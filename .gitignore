@@ -14,7 +14,6 @@ coverage*/
 .idea/
 *.user
 *.suo
-.DS_Store
 Thumbs.db
 
 # Secrets must never be committed

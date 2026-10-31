@@ -37,7 +37,10 @@ MP4 (recommended), WebM or MOV. H.264 (recommended), H.265, VP8 or VP9. 23-60 FP
 - Redirect host is `localhost` or `127.0.0.1`, and a port is required. A wildcard port is allowed: `http://127.0.0.1:*/callback/`.
 - Token endpoint: `POST https://open.tiktokapis.com/v2/oauth/token/`. Exchange and refresh both **require `client_secret`**.
 - Access tokens last 24 hours and refresh tokens 365 days. A refresh can return a new refresh token, which replaces the old one.
-- Revoke: `POST /v2/oauth/revoke/`.
+- Revoke: `POST /v2/oauth/revoke/` with `client_key`, `client_secret` and the access token as `token`.
+- On a failed sign-in the redirect carries `error` and `error_description`. The docs list `state` only for success, so an error without a state is accepted, and an error with a wrong state is ignored.
+- Token errors use the fields `error`, `error_description` and `log_id`, and the docs don't state the HTTP status. `invalid_grant` means the code or refresh token is invalid, expired or revoked. `server_error` and `temporarily_unavailable` are retryable.
+- The app requests `user.info.basic` (display name, from `GET /v2/user/info/?fields=open_id,display_name`) and `video.upload`.
 
 ### Content Sharing Guidelines
 
@@ -85,6 +88,23 @@ There is no API setting. YouTube's help says square or vertical videos up to thr
 - Desktop app client type, loopback redirect `http://127.0.0.1:port`, always PKCE. The S256 challenge is **base64url**, unlike TikTok.
 - `client_secret` is listed as optional. Custom URI schemes and copy/paste flows are not supported.
 - An external app in "Testing" status gets refresh tokens that **expire in 7 days**. Tokens also stop working after six months unused, on revocation, or past 100 per client per account.
+- Endpoints: `https://accounts.google.com/o/oauth2/v2/auth`, `https://oauth2.googleapis.com/token` and `https://oauth2.googleapis.com/revoke`. Revoking removes every scope granted to the project.
+- The installed-apps guide doesn't say a loopback redirect may have a path, so the app uses `http://127.0.0.1:port` with none.
+- The same guide says `state` comes back in the URL fragment, which a local server can't see. The app reads it from the query string, as standard OAuth does. Confirm this at the first real sign-in.
+
+### Scopes
+
+From the [API discovery document](https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest), revision 20261029:
+
+| Method | Scopes that allow it |
+|---|---|
+| `videos.insert` | `youtube`, `youtube.force-ssl`, `youtube.upload`, `youtubepartner` |
+| `playlistItems.insert` | `youtube`, `youtube.force-ssl`, `youtubepartner` |
+| `playlists.list` | `youtube`, `youtube.force-ssl`, `youtube.readonly`, `youtubepartner` |
+| `channels.list` | `youtube`, `youtube.force-ssl`, `youtube.readonly`, `youtubepartner`, `youtubepartner-channel-audit` |
+| `videoCategories.list` | `youtube`, `youtube.force-ssl`, `youtube.readonly`, `youtubepartner` |
+
+The app always requests `youtube.upload` and `youtube.readonly`. Adding to a playlist needs `youtube.force-ssl`, which also allows deleting videos, comments and captions, so it is requested only when the user asks for playlist support. Google doesn't support incremental authorization for installed apps, so turning this on means connecting again.
 
 ## Sources
 
@@ -94,7 +114,10 @@ There is no API setting. YouTube's help says square or vertical videos up to thr
 - [TikTok upload getting started](https://developers.tiktok.com/doc/content-posting-api-get-started-upload-content)
 - [TikTok token management](https://developers.tiktok.com/doc/oauth-user-access-token-management)
 - [TikTok Login Kit for Desktop](https://developers.tiktok.com/doc/login-kit-desktop)
+- [TikTok OAuth error handling](https://developers.tiktok.com/doc/oauth-error-handling)
+- [TikTok user info](https://developers.tiktok.com/doc/tiktok-api-v2-get-user-info)
 - [TikTok Content Sharing Guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines)
+- [Google OAuth for installed apps](https://developers.google.com/youtube/v3/guides/auth/installed-apps)
 - [YouTube videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert)
 - [YouTube videos resource](https://developers.google.com/youtube/v3/docs/videos)
 - [YouTube resumable uploads](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol)
