@@ -1,0 +1,27 @@
+# Build output
+bin/
+obj/
+artifacts/
+publish/
+
+# Test output
+TestResults/
+coverage*/
+
+# IDE and OS files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Secrets must never be committed
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+client_secret*.json
+secrets.json

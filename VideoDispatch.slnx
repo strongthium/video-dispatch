@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/VideoDispatch.Core/VideoDispatch.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/VideoDispatch.Core.Tests/VideoDispatch.Core.Tests.csproj" />
+  </Folder>
+</Solution>
