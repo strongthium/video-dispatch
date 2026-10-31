@@ -4,9 +4,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <Version>0.1.0</Version>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <Authors>strongthium</Authors>
     <Product>video-dispatch</Product>
+    <Company>Strongthium</Company>
+    <Copyright>Copyright (c) 2026 Strongthium</Copyright>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <!-- The version is in VERSION, at the top of the repository. -->
+    <Version>$([System.IO.File]::ReadAllText($(MSBuildThisFileDirectory)VERSION).Trim())</Version>
+    <!-- The program records where it was built (in its debug paths) as /_/, not the folder on the computer that built it. -->
+    <PathMap>$(MSBuildThisFileDirectory)=/_/</PathMap>
   </PropertyGroup>
 </Project>
