@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- video-dispatch: publishes video to TikTok and YouTube. In WPF with Windows' own Fluent theme, so the program itself
+       is small: everything it draws with is in the .NET Desktop Runtime. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>video-dispatch</AssemblyName>
+    <RootNamespace>VideoDispatch.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Program.Main starts the App: it reads the command line first. -->
+    <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
+    <!-- WPF0001: the Fluent theme is experimental in .NET 10. -->
+    <NoWarn>$(NoWarn);WPF0001</NoWarn>
+  </PropertyGroup>
+
+  <!-- WPF leaves System.IO out of the implicit usings (it has a Path of its own, in Shapes). -->
+  <ItemGroup>
+    <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VideoDispatch.Core\VideoDispatch.Core.csproj" />
+  </ItemGroup>
+</Project>

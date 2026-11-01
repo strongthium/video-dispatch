@@ -6,7 +6,7 @@
 
 A Windows desktop app for publishing video to TikTok and YouTube, including Shorts. It runs with no server: each user registers their own TikTok and Google apps, and tokens stay in Windows Credential Manager.
 
-**Status: early development.** Only the core library exists so far: job and preset models, template rendering, an MP4/MOV metadata reader, account sign-in and secure token storage. There is no app to run yet, and it can't upload anything.
+**Status: early development.** The core library has job and preset models, template rendering, an MP4/MOV metadata reader, account sign-in and secure token storage. The app so far is one Accounts screen, where you enter your own app's keys and connect. It can't upload anything yet, and the sign-in has only been run against made-up platforms, not real TikTok or Google accounts.
 
 ## Secure storage
 
@@ -24,10 +24,18 @@ dotnet build
 dotnet test
 ```
 
+To try the app on made-up accounts, with no browser, no network and nothing saved:
+
+```bash
+dotnet run --project src/VideoDispatch -- --sample
+```
+
 ## Project layout
 
 - `src/VideoDispatch.Core`: the publishing library, with no UI code.
+- `src/VideoDispatch`: the Windows app, in WPF.
 - `tests/VideoDispatch.Core.Tests`: tests for the library.
+- `tests/VideoDispatch.Tests`: tests for what the app's screens do.
 - `docs/platform-notes.md`: what the code relies on from each platform's docs.
 
 ## More from Strongthium

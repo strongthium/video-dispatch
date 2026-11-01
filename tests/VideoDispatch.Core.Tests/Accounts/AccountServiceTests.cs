@@ -287,6 +287,30 @@ public class AccountServiceTests
     }
 
     [Fact]
+    public async Task Removing_the_keys_removes_the_sign_in_and_its_token()
+    {
+        var harness = new Harness();
+        await harness.ConnectTikTokAsync();
+
+        await harness.Service.RemoveCredentialsAsync(Platform.TikTok);
+
+        Assert.Empty(harness.Store.Values);
+        Assert.Equal(ConnectionState.NotConnected, harness.Service.GetStatus(Platform.TikTok).State);
+        Assert.False(harness.Service.GetStatus(Platform.TikTok).HasCredentials);
+        await Assert.ThrowsAsync<ReconnectRequiredException>(() => harness.Service.GetAccessTokenAsync(Platform.TikTok));
+    }
+
+    [Fact]
+    public async Task Removing_keys_that_were_never_saved_does_nothing()
+    {
+        var harness = new Harness();
+
+        await harness.Service.RemoveCredentialsAsync(Platform.TikTok);
+
+        Assert.Empty(harness.Store.Values);
+    }
+
+    [Fact]
     public async Task Changing_the_client_removes_its_sign_ins()
     {
         var harness = new Harness();

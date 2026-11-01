@@ -61,6 +61,23 @@ public sealed class AccountService : IAccessTokenSource
         }
     }
 
+    /// <summary>Removes the app keys. Sign-ins belong to the client, so any sign-in goes too, without being revoked.</summary>
+    public async Task RemoveCredentialsAsync(Platform platform, CancellationToken cancellationToken = default)
+    {
+        var state = _states[platform];
+        await state.Gate.WaitAsync(cancellationToken);
+        try
+        {
+            _store.Delete(AccountKey(platform));
+            _store.Delete(CredentialsKey(platform));
+            state.ClearAccessToken();
+        }
+        finally
+        {
+            state.Gate.Release();
+        }
+    }
+
     public AccountStatus GetStatus(Platform platform)
     {
         var account = Load<StoredAccount>(AccountKey(platform));
