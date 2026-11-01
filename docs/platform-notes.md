@@ -156,6 +156,21 @@ From the [API discovery document](https://www.googleapis.com/discovery/v1/apis/y
 
 The app always requests `youtube.upload` and `youtube.readonly`. Adding to a playlist needs `youtube.force-ssl`, which also allows deleting videos, comments and captions, so it is requested only when the user asks for playlist support. Google doesn't support incremental authorization for installed apps, so turning this on means connecting again.
 
+## Windows' media tools
+
+`Windows.Media.Transcoding` and `Windows.Media.Editing`, as tried on 2026-11-01 from a published, unpackaged program. These come from trying them, not from their docs.
+
+- `MediaEncodingProfile.CreateMp4(VideoEncodingQuality.Auto)` won't prepare a transcode, so the app starts from a named quality and sets every value itself.
+- **The transcoder turns a sideways video upright by itself, but takes the size in the order the file stores it.** Asking for 640 x 360 from a 640 x 360 file marked as turned a quarter gives an upright 360 x 640. Asking for 360 x 640 gives a sideways picture fitted into 640 x 360 with black bars. `MediaClip` reports the size as viewers see it, and a composition takes it that way too, so the two disagree. `MediaEncodingProfile.CreateFromFileAsync` reports it as stored.
+- The output has no rotation mark left in it, because the picture itself has been turned.
+- `StorageFile.GetFileFromPathAsync` refuses a relative path.
+- **A background audio track longer than the video makes a file that lies.** It reads as the video's length, then transcodes to something longer. Trim the track to the video.
+- `MediaComposition.GetThumbnailAsync` leaves overlays out, so a frame can come back black where the rendered file is right.
+- An overlay bigger than the frame zooms into the picture, in the rendered file, as a fixed step for as long as the overlay lasts.
+- HEVC rounds sizes: 720p came out 1280 x 736.
+
+The library that reaches these tools, `Microsoft.Windows.SDK.NET.dll`, is 23 MB, and a framework-dependent single file can't be compressed. Listing only the needed types for `CsWinRT` to generate kept pulling in more of Windows. So the published program holds it zipped, at 6 MB, and loads it from memory on first use.
+
 ## Sources
 
 - [TikTok inbox upload](https://developers.tiktok.com/doc/content-posting-api-reference-upload-video)

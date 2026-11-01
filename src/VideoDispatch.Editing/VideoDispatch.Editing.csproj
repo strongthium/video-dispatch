@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Editing with Windows' own media tools. These need the Windows target below, and the app's size depends on how
+       that library is handled: see the app's project. The upload library stays on the plain Windows target. -->
+  <PropertyGroup>
+    <RootNamespace>VideoDispatch.Editing</RootNamespace>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VideoDispatch.Core\VideoDispatch.Core.csproj" />
+  </ItemGroup>
+</Project>

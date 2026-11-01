@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/VideoDispatch.Core/VideoDispatch.Core.csproj" />
+    <Project Path="src/VideoDispatch.Editing/VideoDispatch.Editing.csproj" />
     <Project Path="src/VideoDispatch/VideoDispatch.csproj" />
   </Folder>
   <Folder Name="/tests/">

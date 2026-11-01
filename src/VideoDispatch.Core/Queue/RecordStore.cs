@@ -129,4 +129,9 @@ public sealed record AppFolders(string Root)
     public string TikTokPresets => Path.Combine(Root, "presets-tiktok");
 
     public string YouTubePresets => Path.Combine(Root, "presets-youtube");
+
+    /// <summary>Re-encoded videos, kept only until the platforms have them.</summary>
+    public string Rendered => Path.Combine(Root, "rendered");
+
+    public string Settings => Path.Combine(Root, "settings.json");
 }

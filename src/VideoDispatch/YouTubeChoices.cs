@@ -2,6 +2,7 @@ using System.Globalization;
 using VideoDispatch.Core.Accounts;
 using VideoDispatch.Core.Accounts.Secrets;
 using VideoDispatch.Core.Model;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Uploads;
 using VideoDispatch.Core.YouTube;
 
@@ -76,6 +77,16 @@ public sealed class YouTubeChoices(IYouTubeApi api, Func<Platform, AccountStatus
 
     /// <summary>The account changed, so the next look at the lists asks again.</summary>
     public void Forget() => _loaded = false;
+
+    /// <summary>What can be done to a video before sending it. Nothing is re-encoded unless it's asked for.</summary>
+    public static IReadOnlyList<Choice> EncodeChoices { get; } =
+    [
+        new(Choice.None, "Send the file as it is"),
+        new(nameof(EncodeGoal.HighQuality), "Re-encode to MP4: high quality"),
+        new(nameof(EncodeGoal.Balanced), "Re-encode to MP4: balanced, up to 1080p"),
+        new(nameof(EncodeGoal.SmallFile), "Re-encode to MP4: smaller file, up to 720p"),
+        new(nameof(EncodeGoal.FitSize), "Re-encode to MP4: fit a size"),
+    ];
 
     public static IReadOnlyList<Choice> Privacies(string noChoice) =>
     [

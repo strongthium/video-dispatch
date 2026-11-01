@@ -3,6 +3,7 @@ using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
 using VideoDispatch.Core.Queue;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Templates;
 
 namespace VideoDispatch.Core.Tests.Queue;
@@ -175,6 +176,33 @@ public sealed class QueueStorageAndChecksTests : IDisposable
     public void Doubled_braces_are_not_a_variable()
     {
         Assert.Empty(TemplateRenderer.FindVariables("Use {{this}} and { that } and {}"));
+    }
+
+    [Fact]
+    public void A_problem_with_re_encoding_blocks_queueing()
+    {
+        var check = QueueChecks.Check(YouTube() with { Encode = new EncodeSettings(EncodeGoal.FitSize) }, "a.mp4", 100, Good(), Account(Platform.YouTube, ConnectionState.Connected), Now);
+
+        Assert.Contains("Enter the size to fit, in megabytes.", check.Problems);
+    }
+
+    [Fact]
+    public void A_file_too_big_for_TikTok_can_be_queued_if_it_is_being_made_smaller()
+    {
+        const long FiveGigabytes = 5L * 1024 * 1024 * 1024;
+        var connected = Account(Platform.TikTok, ConnectionState.Connected);
+
+        Assert.False(QueueChecks.Check(new TikTokPostDetails(), "a.mp4", FiveGigabytes, Good(), connected, Now).CanQueue);
+        Assert.True(QueueChecks.Check(new TikTokPostDetails { Encode = new EncodeSettings(EncodeGoal.Balanced) }, "a.mp4", FiveGigabytes, Good(), connected, Now).CanQueue);
+    }
+
+    [Fact]
+    public void A_format_TikTok_refuses_can_be_queued_if_it_is_being_converted()
+    {
+        var connected = Account(Platform.TikTok, ConnectionState.Connected);
+
+        Assert.False(QueueChecks.Check(new TikTokPostDetails(), "a.avi", 100, Good(), connected, Now).CanQueue);
+        Assert.True(QueueChecks.Check(new TikTokPostDetails { Encode = new EncodeSettings(EncodeGoal.HighQuality) }, "a.avi", 100, Good(), connected, Now).CanQueue);
     }
 
     [Fact]

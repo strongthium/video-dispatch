@@ -13,6 +13,7 @@ public sealed partial class MainWindow : Window
     private readonly PresetsPanel _presets;
     private readonly YouTubeChoices _choices;
     private readonly IReadOnlyList<AccountPanel> _accounts;
+    private readonly SettingsPanel _settings;
     private readonly Dictionary<string, UserControl> _pages = [];
 
     /// <param name="services">What the screens work with.</param>
@@ -40,9 +41,11 @@ public sealed partial class MainWindow : Window
 
         _queue = new QueuePanel(services.Queue, action => Dispatcher.BeginInvoke(action));
         _queue.ReportDamaged(damagedJobs);
+        _settings = new SettingsPanel(services.Settings, services.InspectFfmpeg);
 
         Loaded += async (_, _) =>
         {
+            await _settings.LoadAsync();
             await services.Presets.LoadAsync();
             await Task.WhenAll(_accounts.Select(account => account.LoadAsync()));
             await _newPost.RefreshAsync();
@@ -57,6 +60,7 @@ public sealed partial class MainWindow : Window
             "queue" => QueuePlace,
             "presets" => PresetsPlace,
             "accounts" => AccountsPlace,
+            "settings" => SettingsPlace,
             "about" => AboutPlace,
             _ => NewPlace,
         }).IsChecked = true;
@@ -87,6 +91,7 @@ public sealed partial class MainWindow : Window
                 "queue" => new QueuePage { DataContext = _queue },
                 "presets" => new PresetsPage { DataContext = _presets },
                 "accounts" => new AccountsPage(_accounts),
+                "settings" => new SettingsPage { DataContext = _settings },
                 "about" => new AboutPage(),
                 _ => new NewPostPage { DataContext = _newPost },
             };

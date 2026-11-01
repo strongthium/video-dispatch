@@ -8,6 +8,8 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>video-dispatch</AssemblyName>
     <RootNamespace>VideoDispatch.App</RootNamespace>
+    <!-- Windows' media tools need this target. See PackWinRT below for what it costs. -->
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
     <ApplicationIcon>Assets\video-dispatch.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Program.Main starts the App: it reads the command line first. -->
@@ -24,10 +26,24 @@
     <DebugType>none</DebugType>
   </PropertyGroup>
 
-  <!-- A release is the one program: no debug symbols beside it. -->
+  <!-- A release is the one program: no debug symbols beside it, and Microsoft's 23 MB library for reaching Windows'
+       media tools goes in zipped, at about 6 MB, because a single file that needs the runtime can't be compressed as a
+       whole. WinRtLibrary unpacks it the first time something is encoded. -->
   <Target Name="LeaveOut" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
-      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb' Or '%(Filename)' == 'Microsoft.Windows.SDK.NET'" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="PackWinRT" BeforeTargets="PrepareForBuild;CoreCompile;PrepareResources" DependsOnTargets="ResolveFrameworkReferences;ResolveRuntimePackAssets" Condition="'$(RuntimeIdentifier)' != ''">
+    <ItemGroup>
+      <WinRTToPack Include="@(RuntimePackAsset)" Condition="'%(Filename)' == 'Microsoft.Windows.SDK.NET'" />
+    </ItemGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)winrt" />
+    <Copy SourceFiles="@(WinRTToPack)" DestinationFolder="$(IntermediateOutputPath)winrt" />
+    <ZipDirectory SourceDirectory="$(IntermediateOutputPath)winrt" DestinationFile="$(IntermediateOutputPath)winrt.zip" Overwrite="true" />
+    <ItemGroup>
+      <EmbeddedResource Include="$(IntermediateOutputPath)winrt.zip" LogicalName="winrt.zip" />
     </ItemGroup>
   </Target>
 
@@ -43,5 +59,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VideoDispatch.Core\VideoDispatch.Core.csproj" />
+    <ProjectReference Include="..\VideoDispatch.Editing\VideoDispatch.Editing.csproj" />
   </ItemGroup>
 </Project>

@@ -8,7 +8,7 @@ namespace VideoDispatch.App;
 /// <summary>
 /// The command line: <c>video-dispatch [video]</c> opens New post on that video. <c>--sample</c> runs on made-up data,
 /// with no browser, no network and nothing saved. <c>--theme light|dark</c> sets the look rather than following
-/// Windows. <c>--page new|queue|presets|accounts|about</c> opens on that page, for the README's pictures.
+/// Windows. <c>--page new|queue|presets|accounts|settings|about</c> opens on that page, for the README's pictures.
 /// <c>--wait-for pid</c> is how an update starts the new program.
 /// </summary>
 internal static class Program

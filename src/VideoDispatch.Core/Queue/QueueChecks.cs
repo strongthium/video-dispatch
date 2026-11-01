@@ -1,6 +1,7 @@
 using VideoDispatch.Core.Accounts;
 using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Templates;
 using VideoDispatch.Core.TikTok;
 using VideoDispatch.Core.Uploads;
@@ -34,10 +35,26 @@ public static class QueueChecks
             problems.Add($"{{{name}}} isn't a variable this app can fill in, so it would be posted as written.");
         }
 
+        // A re-encoded video is judged as what it will be. The uploaders check the real file again before sending it.
+        var sentPath = path;
+        var sentSize = size;
+        if (details.Encode is { } encode)
+        {
+            if (EncodePlan.ProblemWith(encode, metadata) is { } encodeProblem)
+            {
+                problems.Add(encodeProblem);
+            }
+            else
+            {
+                sentPath = Path.ChangeExtension(path, ".mp4");
+                sentSize = EncodePlan.For(encode, metadata, size).EstimatedBytes is { } estimate ? Math.Min(estimate, size) : size;
+            }
+        }
+
         IReadOnlyList<VideoLimitFinding> findings = details switch
         {
-            TikTokPostDetails => TikTokVideoLimits.Check(path, size, metadata),
-            _ => YouTubeVideoLimits.Check(size),
+            TikTokPostDetails => TikTokVideoLimits.Check(sentPath, sentSize, metadata),
+            _ => YouTubeVideoLimits.Check(sentSize),
         };
 
         foreach (var finding in findings)

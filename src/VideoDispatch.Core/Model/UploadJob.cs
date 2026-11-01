@@ -21,8 +21,14 @@ public sealed record UploadJob
     public required PostDetails Details { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
 
-    /// <summary>The output of the later render step. Null means the source is published as it is.</summary>
+    /// <summary>The output of the render step. Null means the source is published as it is.</summary>
     public string? RenderedPath { get; init; }
+
+    /// <summary>The render step has looked at this job and chose to send the source, so it needn't look again.</summary>
+    public bool KeptSource { get; init; }
+
+    /// <summary>Something done along the way that the user may want to know, though nothing is wrong.</summary>
+    public string? Note { get; init; }
 
     public JobState State { get; init; } = JobState.Queued;
     public int Attempts { get; init; }

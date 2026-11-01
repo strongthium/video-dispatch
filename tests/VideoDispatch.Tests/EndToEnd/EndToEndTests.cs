@@ -3,10 +3,13 @@ using System.Text;
 using System.Text.Json;
 using VideoDispatch.App;
 using VideoDispatch.Core.Accounts.Secrets;
+using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
 using VideoDispatch.Core.Queue;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Tests.Media;
+using VideoDispatch.Tests.Reencoding;
 
 namespace VideoDispatch.Tests.EndToEnd;
 
@@ -230,6 +233,49 @@ public sealed class EndToEndTests : IAsyncDisposable
         await app.UntilAsync(Platform.YouTube, job => job.State == JobState.Completed);
 
         Assert.Equal(bytes, Assert.Single(_platforms.YouTubeVideos));
+        Assert.Empty(_platforms.Problems);
+    }
+
+    [Fact]
+    public async Task A_video_re_encoded_with_Windows_tools_reaches_both_platforms_and_the_original_stays_as_it_was()
+    {
+        // Not an MP4, so the new file is kept whatever its size, and TikTok wouldn't have taken the original.
+        var made = await TestVideos.MakeAsync(_folder, "walk.mp4", 1280, 720);
+        var path = Path.ChangeExtension(made, ".m4v");
+        File.Move(made, path);
+        var original = File.ReadAllBytes(path);
+        var app = OpenApp();
+
+        await app.ConnectBothAsync(wantPlaylists: false);
+        await app.NewPost.RefreshAsync();
+        await app.NewPost.ChooseVideoAsync(path);
+        app.NewPost.Caption = "A caption";
+        app.NewPost.PrivacyId = nameof(YouTubePrivacy.Private);
+        app.NewPost.MadeForKidsId = YouTubeChoices.NoId;
+        app.NewPost.TikTokEncodeId = nameof(EncodeGoal.SmallFile);
+        app.NewPost.YouTubeEncodeId = nameof(EncodeGoal.SmallFile);
+        Assert.True(app.NewPost.CanQueue, string.Join(" ", app.NewPost.Problems));
+
+        await app.NewPost.QueueAsync();
+
+        await app.UntilAsync(Platform.TikTok, job => job.State == JobState.AwaitingCreator);
+        var finished = await app.UntilAsync(Platform.YouTube, job => job.State == JobState.Completed);
+
+        var sent = Assert.Single(_platforms.YouTubeVideos);
+        Assert.Equal(sent, Assert.Single(_platforms.TikTokVideos));
+        Assert.Equal(original, File.ReadAllBytes(path));
+        Assert.NotEqual(original, sent);
+        Assert.Equal(sent.Length, finished.TotalBytes);
+
+        // The file itself reads back as what was asked for, and it's gone from the app's folder once both have it.
+        var check = Path.Combine(_folder, "sent.mp4");
+        await File.WriteAllBytesAsync(check, sent);
+        var read = Mp4MetadataReader.Read(check);
+        Assert.Equal((1280, 720), (read!.DisplayWidth, read.DisplayHeight));
+        Assert.Equal("avc1", read.CodecTag);
+        Assert.Empty(Directory.EnumerateFiles(Path.Combine(_folder, "data", "rendered")));
+
+        AssertNoSecretOnDisk();
         Assert.Empty(_platforms.Problems);
     }
 

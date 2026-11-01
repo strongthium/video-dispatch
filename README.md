@@ -6,9 +6,9 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, and fills in text from your own presets.
+`video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, fills in text from your own presets, and can compress or re-encode a video to MP4 before sending it.
 
-It runs on Windows 10 and 11, is one file of about 650 KB with nothing to install, and has no server. You register your own TikTok and Google apps, and your videos go straight from your PC to them.
+It runs on Windows 10 (version 2004 or later) and 11, is one file of about 7 MB with nothing to install, and has no server. You register your own TikTok and Google apps, and your videos go straight from your PC to them.
 
 > [!WARNING]
 > **This hasn't been run against real TikTok or Google accounts yet**, only against local servers built from their docs. TikTok may also refuse the app you register, which would leave only YouTube. See [What hasn't been tried](#what-hasnt-been-tried) and [Registering your apps](#registering-your-apps).
@@ -32,6 +32,23 @@ TikTok's inbox upload has no field for a caption. So the video arrives in your T
 ![The YouTube part of New post](docs/new-post-youtube.png)
 
 For YouTube you choose privacy and made for kids yourself each time, unless a preset chose them. YouTube treats a missing privacy as public, so nothing is queued without one. The preview is built from the same values that are sent, so it's exactly what YouTube gets. A scheduled video stays private until its time, even with the app closed.
+
+### Compressing and re-encoding
+
+Each platform has its own **Before sending** choice. It starts on sending the file as it is, and nothing is re-encoded unless you ask.
+
+| | |
+|---|---|
+| **High quality** | an H.264 MP4 at the same picture size |
+| **Balanced** | the same, at up to 1080p |
+| **Smaller file** | the same, at up to 720p |
+| **Fit a size** | as many megabytes as you say, with the picture made smaller too if the size calls for it |
+
+Your original is never changed. The new file stays in the app's own folder until the platforms have it, and two platforms asking for the same thing share one file. An MP4 that wouldn't come out smaller is sent as it is, and the job says so. A video too big or in a format TikTok refuses can be queued if it's being made into something TikTok takes. The platforms compress everything again, so re-encoding is mainly for fitting limits, not for looking better.
+
+![Settings](docs/settings.png)
+
+Windows' own tools do this, so there's nothing to install. If you'd rather use [FFmpeg](https://ffmpeg.org/download.html), point the app at your own `ffmpeg.exe` under **Settings**: it reads more formats, and aims at a quality rather than a bitrate. The app doesn't include it or download it, and nothing needs it.
 
 ### Queue
 
@@ -68,9 +85,9 @@ Adding videos to playlists is off unless you ask for it, because the YouTube per
 
 ## Using it
 
-Take the `.exe` straight from [`public/`](public), which always holds the latest build: `video-dispatch-win-x64-needs-dotnet.exe`, about 650 KB, for Windows 10 and 11 on x64 PCs. It runs on the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed on the PC, which Microsoft Update keeps patched. Without it, Windows offers to download it. There's no release to download yet.
+Take the `.exe` straight from [`public/`](public), which always holds the latest build: `video-dispatch-win-x64-needs-dotnet.exe`, about 7 MB, for Windows 10 (version 2004 or later) and 11 on x64 PCs. It runs on the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed on the PC, which Microsoft Update keeps patched. Without it, Windows offers to download it. There's no release to download yet.
 
-The program is small because it draws with what Windows and .NET already have: WPF, with Windows 11's own look (light or dark, in your accent colour). It adds no packages.
+The program is small because it draws with what Windows and .NET already have: WPF, with Windows 11's own look (light or dark, in your accent colour). It adds no packages. About 6 MB of it is Microsoft's own library for reaching Windows' media tools, kept zipped inside the program and unpacked into memory only when a video is re-encoded.
 
 1. [Register your apps](#registering-your-apps), once.
 2. Under **Accounts**, enter each app's keys, save them, and press **Connect**. Your browser opens for you to approve.
@@ -83,7 +100,7 @@ From the command line:
 video-dispatch D:\Videos\walk.mp4     # opens New post on that video
 video-dispatch --sample               # made-up accounts and jobs, no browser, no network, nothing saved
 video-dispatch --theme dark           # light or dark, rather than following Windows
-video-dispatch --page queue           # opens on new, queue, presets, accounts or about
+video-dispatch --page queue           # opens on new, queue, presets, accounts, settings or about
 ```
 
 ## Registering your apps
@@ -130,10 +147,13 @@ A Google project gets 100 video uploads a day through YouTube's API, and its quo
 
 ## What hasn't been tried
 
-Everything has been tested against made-up platforms: 655 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
+Everything has been tested against made-up platforms: 746 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
 
 - A real sign-in or upload on TikTok or YouTube, or an app approval from TikTok.
 - A real video from a phone, rotated, through **New post**. Reading video details has been tried on real files, but rotation only on hand-built ones.
+- Re-encoding real footage. Windows' tools have really encoded test videos, sideways ones included, but those are flat colours. So how it looks, how close **Fit a size** comes, and how long a long video takes are all still to be seen.
+- A real FFmpeg. The app has only run a stand-in that answers the way FFmpeg's docs say.
+- An edition of Windows without the media tools, such as N editions. Re-encoding there should say to install the Media Feature Pack or choose FFmpeg.
 - An update from a real release, because there's no release yet. The check for one has run against GitHub, and the update itself against made-up downloads.
 
 Details that only a real account can settle are in [`docs/platform-notes.md`](docs/platform-notes.md), which records what the code relies on from each platform's docs.
@@ -151,8 +171,8 @@ There's no server and no telemetry. Your videos and what you write go from your 
 | | |
 |---|---|
 | **Keys, sign-ins and the addresses of unfinished uploads** | only in Windows Credential Manager, never in a plain file. Access tokens stay in memory |
-| **Jobs and presets** | JSON files under `%LOCALAPPDATA%\video-dispatch`, with no secrets in them |
-| **Your videos** | read where they are. They aren't copied or changed |
+| **Jobs, presets and settings** | JSON files under `%LOCALAPPDATA%\video-dispatch`, with no secrets in them |
+| **Your videos** | read where they are, and never changed. A re-encoded copy stays under that folder until the platforms have it |
 
 To remove it all, press **Disconnect** and **Remove keys** under **Accounts**, delete that folder, and delete the program.
 
@@ -179,8 +199,9 @@ dotnet run --project src/VideoDispatch -- --sample
 
 | Folder | What's in it |
 |---|---|
-| [`src/VideoDispatch.Core`](src/VideoDispatch.Core) | the publishing library, with no UI: sign-ins, both upload clients, the queue, presets, reading video details, updates |
-| [`src/VideoDispatch`](src/VideoDispatch) | the window (WPF, with its Fluent theme): New post, Queue, Presets, Accounts and About, and the made-up sample |
+| [`src/VideoDispatch.Core`](src/VideoDispatch.Core) | the publishing library, with no UI: sign-ins, both upload clients, the queue, presets, reading video details, what re-encoding aims for, FFmpeg, updates |
+| [`src/VideoDispatch.Editing`](src/VideoDispatch.Editing) | re-encoding with Windows' own media tools |
+| [`src/VideoDispatch`](src/VideoDispatch) | the window (WPF, with its Fluent theme): New post, Queue, Presets, Accounts, Settings and About, and the made-up sample |
 | [`tests/VideoDispatch.Core.Tests`](tests/VideoDispatch.Core.Tests) | tests of the library, some over real sockets to local servers |
 | [`tests/VideoDispatch.Tests`](tests/VideoDispatch.Tests) | tests of what the screens do, and the end-to-end tests |
 | [`docs/platform-notes.md`](docs/platform-notes.md) | what the code relies on from each platform's docs |

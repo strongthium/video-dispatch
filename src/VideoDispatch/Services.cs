@@ -5,9 +5,11 @@ using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
 using VideoDispatch.Core.Queue;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.TikTok;
 using VideoDispatch.Core.Uploads;
 using VideoDispatch.Core.YouTube;
+using VideoDispatch.Editing;
 
 namespace VideoDispatch.App;
 
@@ -18,7 +20,9 @@ public sealed record Services(
     UploadQueue Queue,
     PresetLibrary Presets,
     IYouTubeApi YouTube,
-    Func<string, VideoMetadata?> ReadMetadata)
+    Func<string, VideoMetadata?> ReadMetadata,
+    AppSettingsStore Settings,
+    Func<string, CancellationToken, Task<FfmpegInfo>> InspectFfmpeg)
 {
     public static Services CreateReal() =>
         Create(new WindowsCredentialStore(), AppFolders.ForThisUser, Browser.OpenSignInAsync, handler => handler);
@@ -46,13 +50,19 @@ public sealed record Services(
         var uploads = new HttpClient(network(new SocketsHttpHandler { AllowAutoRedirect = false })) { Timeout = Timeout.InfiniteTimeSpan };
         var sessions = new SecretUploadSessionStore(secrets);
         var youTube = new YouTubeApi(uploads, accounts, time);
+        var settings = new AppSettingsStore(folders.Settings);
+
+        // FFmpeg is only ever the user's choice. Without it, Windows' own tools do the work.
+        IVideoEncoder Encoder() => settings.Current.FfmpegPath is { Length: > 0 } ffmpeg
+            ? new FfmpegVideoEncoder(ffmpeg)
+            : new WindowsVideoEncoder();
 
         var queue = new UploadQueue(
             new JsonFolderStore<UploadJob>(folders.Jobs),
             [new TikTokUploader(uploads, accounts, time), new YouTubeUploader(uploads, accounts, sessions, time)],
             sessions,
             youTube,
-            new PassThroughRenderStep(),
+            new EncodeRenderStep(Encoder, folders.Rendered, Mp4MetadataReader.Read),
             accounts.GetStatus,
             time);
 
@@ -60,6 +70,6 @@ public sealed record Services(
             new JsonFolderStore<TikTokPreset>(folders.TikTokPresets),
             new JsonFolderStore<YouTubePreset>(folders.YouTubePresets));
 
-        return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read);
+        return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read, settings, FfmpegVideoEncoder.InspectAsync);
     }
 }

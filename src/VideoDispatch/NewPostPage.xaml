@@ -33,6 +33,12 @@
           <ComboBox ItemsSource="{Binding TikTokPresets}" SelectedItem="{Binding TikTokPreset}" DisplayMemberPath="Name" MinWidth="240" HorizontalAlignment="Left" AutomationProperties.Name="TikTok preset" />
           <TextBlock Text="Caption" Style="{StaticResource Caption}" Margin="0,10,0,4" />
           <TextBox Text="{Binding Caption, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" AutomationProperties.Name="TikTok caption" />
+          <TextBlock Text="Before sending" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <StackPanel Orientation="Horizontal">
+            <ComboBox ItemsSource="{Binding EncodeChoices}" SelectedValue="{Binding TikTokEncodeId, TargetNullValue=''}" SelectedValuePath="Id" DisplayMemberPath="Title" MinWidth="320" AutomationProperties.Name="TikTok before sending" />
+            <TextBox Text="{Binding TikTokTargetMegabytes, UpdateSourceTrigger=PropertyChanged}" Width="90" Margin="8,0,4,0" AutomationProperties.Name="TikTok size to fit, in megabytes" Visibility="{Binding TikTokFitsSize, Converter={StaticResource VisibleIf}}" />
+            <TextBlock Text="MB" VerticalAlignment="Center" Visibility="{Binding TikTokFitsSize, Converter={StaticResource VisibleIf}}" />
+          </StackPanel>
           <TextBlock Text="Preview" FontWeight="SemiBold" Margin="0,14,0,4" />
           <TextBlock Text="{Binding TikTokPreview}" Style="{StaticResource Muted}" />
         </StackPanel>
@@ -88,6 +94,15 @@
           </StackPanel>
           <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" Visibility="{Binding Scheduled, Converter={StaticResource VisibleIf}}"
                      Text="A scheduled video stays private until then, even with this app closed. If it hasn't started uploading by then, it won't start." />
+
+          <TextBlock Text="Before sending" Style="{StaticResource Caption}" Margin="0,14,0,4" />
+          <StackPanel Orientation="Horizontal">
+            <ComboBox ItemsSource="{Binding EncodeChoices}" SelectedValue="{Binding YouTubeEncodeId, TargetNullValue=''}" SelectedValuePath="Id" DisplayMemberPath="Title" MinWidth="320" AutomationProperties.Name="YouTube before sending" />
+            <TextBox Text="{Binding YouTubeTargetMegabytes, UpdateSourceTrigger=PropertyChanged}" Width="90" Margin="8,0,4,0" AutomationProperties.Name="YouTube size to fit, in megabytes" Visibility="{Binding YouTubeFitsSize, Converter={StaticResource VisibleIf}}" />
+            <TextBlock Text="MB" VerticalAlignment="Center" Visibility="{Binding YouTubeFitsSize, Converter={StaticResource VisibleIf}}" />
+          </StackPanel>
+          <TextBlock Style="{StaticResource Caption}" Margin="0,4,0,0" TextWrapping="Wrap"
+                     Text="YouTube compresses everything again, so re-encoding is mainly for fitting limits. Your original isn't changed." />
 
           <TextBlock Text="Preview" FontWeight="SemiBold" Margin="0,14,0,4" />
           <TextBlock Text="{Binding YouTubePreview}" Style="{StaticResource Muted}" />

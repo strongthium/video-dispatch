@@ -7,6 +7,7 @@ using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
 using VideoDispatch.Core.Queue;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Templates;
 using VideoDispatch.Core.YouTube;
 
@@ -47,6 +48,10 @@ public sealed class NewPostPanel : INotifyPropertyChanged
     private YouTubePreset? _youTubePreset;
     private bool _captionEdited;
     private bool _youTubeEdited;
+    private string? _tikTokEncodeId;
+    private string _tikTokTargetMegabytes = "";
+    private string? _youTubeEncodeId;
+    private string _youTubeTargetMegabytes = "";
     private QueueCheck _check = new([], []);
 
     public NewPostPanel(
@@ -262,6 +267,36 @@ public sealed class NewPostPanel : INotifyPropertyChanged
         set => Set(ref _scheduleTime, value);
     }
 
+    public IReadOnlyList<Choice> EncodeChoices => YouTubeChoices.EncodeChoices;
+
+    public string? TikTokEncodeId
+    {
+        get => _tikTokEncodeId;
+        set => Set(ref _tikTokEncodeId, Choice.Clean(value));
+    }
+
+    public bool TikTokFitsSize => _tikTokEncodeId == nameof(EncodeGoal.FitSize);
+
+    public string TikTokTargetMegabytes
+    {
+        get => _tikTokTargetMegabytes;
+        set => Set(ref _tikTokTargetMegabytes, value);
+    }
+
+    public string? YouTubeEncodeId
+    {
+        get => _youTubeEncodeId;
+        set => Set(ref _youTubeEncodeId, Choice.Clean(value));
+    }
+
+    public bool YouTubeFitsSize => _youTubeEncodeId == nameof(EncodeGoal.FitSize);
+
+    public string YouTubeTargetMegabytes
+    {
+        get => _youTubeTargetMegabytes;
+        set => Set(ref _youTubeTargetMegabytes, value);
+    }
+
     public IReadOnlyList<string> Problems => _check.Problems;
 
     public IReadOnlyList<string> Warnings => _check.Warnings;
@@ -366,7 +401,7 @@ public sealed class NewPostPanel : INotifyPropertyChanged
         var posts = new List<PostDetails>();
         if (_postToTikTok)
         {
-            posts.Add(new TikTokPostDetails { Caption = _caption.Trim() });
+            posts.Add(new TikTokPostDetails { Caption = _caption.Trim(), Encode = EncodeFrom(_tikTokEncodeId, _tikTokTargetMegabytes) });
         }
 
         if (_postToYouTube)
@@ -381,15 +416,67 @@ public sealed class NewPostPanel : INotifyPropertyChanged
                 MadeForKids = YouTubeChoices.MadeForKidsFrom(_madeForKidsId),
                 PlaylistId = _playlistId,
                 PublishAt = PublishAt(),
+                Encode = EncodeFrom(_youTubeEncodeId, _youTubeTargetMegabytes),
             });
         }
 
         return posts;
     }
 
-    private static string Describe(TikTokPostDetails post)
+    private static EncodeSettings? EncodeFrom(string? id, string targetMegabytes)
+    {
+        if (!Enum.TryParse<EncodeGoal>(id, out var goal))
+        {
+            return null;
+        }
+
+        return new EncodeSettings(
+            goal,
+            goal == EncodeGoal.FitSize && int.TryParse(targetMegabytes, NumberStyles.Integer, CultureInfo.CurrentCulture, out var megabytes) ? megabytes : null);
+    }
+
+    /// <summary>What re-encoding will make, as far as can be told. Null when the file goes as it is.</summary>
+    private string? DescribeEncode(PostDetails post)
+    {
+        if (post.Encode is not { } encode)
+        {
+            return null;
+        }
+
+        if (_path is null || EncodePlan.ProblemWith(encode, _metadata) is not null)
+        {
+            return "Re-encoded to MP4 (H.264) first. Your original isn't changed.";
+        }
+
+        var plan = EncodePlan.For(encode, _metadata, _size);
+        var parts = new List<string>();
+        if (plan is { Width: { } width, Height: { } height })
+        {
+            parts.Add($"{width} × {height}");
+        }
+
+        if (plan.EstimatedBytes is { } bytes && plan.ConstantQuality is null)
+        {
+            parts.Add(string.Format(CultureInfo.CurrentCulture, "about {0:N0} MB", bytes / (1024.0 * 1024.0)));
+        }
+        else if (plan.EstimatedBytes is { } guess)
+        {
+            parts.Add(string.Format(CultureInfo.CurrentCulture, "around {0:N0} MB, from {1:N0} MB", guess / (1024.0 * 1024.0), _size / (1024.0 * 1024.0)));
+        }
+
+        var detail = parts.Count > 0 ? ", " + string.Join(", ", parts) : "";
+        return $"Re-encoded to MP4 (H.264) first{detail}. Your original isn't changed.";
+    }
+
+    private string Describe(TikTokPostDetails post)
     {
         var text = new StringBuilder();
+        if (DescribeEncode(post) is { } encode)
+        {
+            text.AppendLine(encode);
+            text.AppendLine();
+        }
+
         text.AppendLine("The video goes to your TikTok inbox as a draft. TikTok's upload can't carry a caption, so you finish the post in TikTok, and this is there to paste in:");
         text.AppendLine();
         text.Append(post.Caption.Length > 0 ? post.Caption : "(no caption)");
@@ -399,6 +486,11 @@ public sealed class NewPostPanel : INotifyPropertyChanged
     private string Describe(YouTubePostDetails post)
     {
         var text = new StringBuilder();
+        if (DescribeEncode(post) is { } encode)
+        {
+            text.AppendLine(encode);
+        }
+
         text.AppendLine(CultureInfo.CurrentCulture, $"Title: {(post.Title.Length > 0 ? post.Title : "(none)")}");
         text.AppendLine(CultureInfo.CurrentCulture, $"Description: {(post.Description.Length > 0 ? post.Description : "(none)")}");
         text.AppendLine(CultureInfo.CurrentCulture, $"Tags: {(post.Tags.Count > 0 ? string.Join(", ", post.Tags) : "(none)")}");
@@ -486,6 +578,10 @@ public sealed class NewPostPanel : INotifyPropertyChanged
         _youTubePreset = null;
         _captionEdited = false;
         _youTubeEdited = false;
+        _tikTokEncodeId = null;
+        _tikTokTargetMegabytes = "";
+        _youTubeEncodeId = null;
+        _youTubeTargetMegabytes = "";
         _check = new QueueCheck([], []);
         Recheck();
     }

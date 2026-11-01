@@ -4,9 +4,98 @@ using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
 using VideoDispatch.Core.Queue;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Uploads;
 
 namespace VideoDispatch.Tests;
+
+public sealed class SettingsPanelTests
+{
+    private readonly AppSettingsStore _store = new(null);
+    private Func<string, FfmpegInfo> _inspect = _ => new FfmpegInfo("ffmpeg version 9.9", true);
+
+    private SettingsPanel Panel() => new(_store, (path, _) => Task.FromResult(_inspect(path)));
+
+    [Fact]
+    public async Task Starts_on_Windows_tools_with_nothing_to_do()
+    {
+        var panel = Panel();
+        await panel.LoadAsync();
+
+        Assert.False(panel.IsUsingFfmpeg);
+        Assert.Contains("Windows' own tools", panel.EngineText);
+        Assert.False(panel.CanUse);
+        Assert.False(panel.CanStopUsing);
+    }
+
+    [Fact]
+    public async Task Uses_FFmpeg_once_it_checks_out_and_says_which()
+    {
+        var panel = Panel();
+        panel.FfmpegPath = "  \"C:\\Tools\\ffmpeg.exe\" ";
+
+        await panel.UseAsync();
+
+        Assert.True(panel.IsUsingFfmpeg);
+        Assert.Equal(@"C:\Tools\ffmpeg.exe", _store.Current.FfmpegPath);
+        Assert.Contains("ffmpeg version 9.9", panel.Message);
+        Assert.False(panel.MessageIsError);
+    }
+
+    [Fact]
+    public async Task A_program_that_fails_the_check_is_not_saved()
+    {
+        _inspect = _ => throw new EncodeException("That program doesn't say it's FFmpeg.");
+        var panel = Panel();
+        panel.FfmpegPath = @"C:\Tools\notepad.exe";
+
+        await panel.UseAsync();
+
+        Assert.False(panel.IsUsingFfmpeg);
+        Assert.Null(_store.Current.FfmpegPath);
+        Assert.True(panel.MessageIsError);
+    }
+
+    [Fact]
+    public async Task A_build_without_H264_is_not_saved()
+    {
+        _inspect = _ => new FfmpegInfo("ffmpeg version 9.9", false);
+        var panel = Panel();
+        panel.FfmpegPath = @"C:\Tools\ffmpeg.exe";
+
+        await panel.UseAsync();
+
+        Assert.Null(_store.Current.FfmpegPath);
+        Assert.Contains("no H.264 encoder", panel.Message);
+    }
+
+    [Fact]
+    public async Task Going_back_to_Windows_tools_forgets_the_program()
+    {
+        var panel = Panel();
+        panel.FfmpegPath = @"C:\Tools\ffmpeg.exe";
+        await panel.UseAsync();
+
+        await panel.StopUsingAsync();
+
+        Assert.False(panel.IsUsingFfmpeg);
+        Assert.Null(_store.Current.FfmpegPath);
+        Assert.Equal("", panel.FfmpegPath);
+    }
+
+    [Fact]
+    public async Task A_saved_choice_shows_at_the_next_start()
+    {
+        _store.Save(new AppSettings(@"C:\Tools\ffmpeg.exe"));
+        var panel = Panel();
+
+        await panel.LoadAsync();
+
+        Assert.True(panel.IsUsingFfmpeg);
+        Assert.Equal(@"C:\Tools\ffmpeg.exe", panel.FfmpegPath);
+        Assert.True(panel.CanStopUsing);
+    }
+}
 
 public sealed class NewPostPanelTests : IAsyncDisposable
 {
@@ -76,6 +165,97 @@ public sealed class NewPostPanelTests : IAsyncDisposable
         Assert.Contains("couldn't be read", _panel.MetadataText);
         Assert.Contains("Couldn't tell", _panel.ShortsText);
         Assert.NotEmpty(_panel.Warnings);
+    }
+
+    [Fact]
+    public async Task A_video_goes_as_it_is_unless_re_encoding_is_asked_for()
+    {
+        await ReadyAsync();
+
+        Assert.All(_panel.BuildPosts(), post => Assert.Null(post.Encode));
+        Assert.DoesNotContain("Re-encoded", _panel.TikTokPreview);
+        Assert.DoesNotContain("Re-encoded", _panel.YouTubePreview);
+    }
+
+    [Fact]
+    public async Task Each_platform_has_its_own_choice_and_the_preview_says_what_it_will_make()
+    {
+        _metadata = new VideoMetadata(1080, 1920, 0, TimeSpan.FromSeconds(47), 30, "avc1");
+        await ReadyAsync();
+
+        _panel.TikTokEncodeId = nameof(EncodeGoal.SmallFile);
+        _panel.YouTubeEncodeId = nameof(EncodeGoal.HighQuality);
+
+        Assert.Equal(EncodeGoal.SmallFile, _panel.BuildPosts().OfType<TikTokPostDetails>().Single().Encode!.Goal);
+        Assert.Equal(EncodeGoal.HighQuality, _panel.BuildPosts().OfType<YouTubePostDetails>().Single().Encode!.Goal);
+        Assert.Contains("Re-encoded to MP4 (H.264) first, 720 × 1280", _panel.TikTokPreview);
+        Assert.Contains("Re-encoded to MP4 (H.264) first, 1080 × 1920", _panel.YouTubePreview);
+        Assert.Contains("Your original isn't changed", _panel.YouTubePreview);
+    }
+
+    [Fact]
+    public async Task Fitting_a_size_asks_for_the_size_and_estimates_the_result()
+    {
+        await ReadyAsync();
+        ChooseEverything();
+        _panel.PostToTikTok = false;
+
+        _panel.YouTubeEncodeId = nameof(EncodeGoal.FitSize);
+
+        Assert.True(_panel.YouTubeFitsSize);
+        Assert.False(_panel.TikTokFitsSize);
+        Assert.Contains("Enter the size to fit, in megabytes.", _panel.Problems);
+        Assert.False(_panel.CanQueue);
+
+        _panel.YouTubeTargetMegabytes = "20";
+
+        Assert.Empty(_panel.Problems);
+        Assert.True(_panel.CanQueue);
+        Assert.Equal(20, _panel.BuildPosts().Single().Encode!.TargetMegabytes);
+        Assert.Contains("about 19 MB", _panel.YouTubePreview);
+    }
+
+    [Fact]
+    public async Task A_size_that_is_not_a_number_counts_as_no_size()
+    {
+        await ReadyAsync();
+        ChooseEverything();
+        _panel.PostToTikTok = false;
+        _panel.YouTubeEncodeId = nameof(EncodeGoal.FitSize);
+
+        _panel.YouTubeTargetMegabytes = "lots";
+
+        Assert.Contains("Enter the size to fit, in megabytes.", _panel.Problems);
+    }
+
+    [Fact]
+    public async Task Re_encoding_lets_in_a_format_TikTok_would_refuse()
+    {
+        var avi = Path.Combine(_folder, "old-camera.avi");
+        File.WriteAllBytes(avi, new byte[1024]);
+        await _panel.RefreshAsync();
+        await _panel.ChooseVideoAsync(avi);
+        _panel.PostToYouTube = false;
+
+        Assert.False(_panel.CanQueue);
+
+        _panel.TikTokEncodeId = nameof(EncodeGoal.Balanced);
+
+        Assert.True(_panel.CanQueue);
+    }
+
+    [Fact]
+    public async Task The_choice_goes_with_the_job_and_clears_for_the_next_video()
+    {
+        await ReadyAsync();
+        ChooseEverything();
+        _panel.YouTubeEncodeId = nameof(EncodeGoal.Balanced);
+
+        await _panel.QueueAsync();
+
+        Assert.Equal(EncodeGoal.Balanced, _jobs.Saved.Values.Single(job => job.Platform == Platform.YouTube).Details.Encode!.Goal);
+        Assert.Null(_jobs.Saved.Values.Single(job => job.Platform == Platform.TikTok).Details.Encode);
+        Assert.Null(_panel.YouTubeEncodeId);
     }
 
     [Fact]
@@ -394,6 +574,34 @@ public sealed class QueuePanelTests : IAsyncDisposable
         State = state,
         RemoteId = remoteId,
     };
+
+    [Fact]
+    public void Re_encoding_shows_how_far_along_it_is()
+    {
+        var row = new JobRow(Job(JobState.Rendering, new YouTubePostDetails { Encode = new EncodeSettings(EncodeGoal.Balanced) }) with { BytesSent = 4 * 1024 * 1024 });
+
+        Assert.Equal("Re-encoding: 40%", row.StateText);
+        Assert.True(row.ShowsProgress);
+        Assert.False(row.ProgressIsUnknown);
+    }
+
+    [Fact]
+    public void Getting_ready_with_nothing_to_encode_has_no_percentage()
+    {
+        var row = new JobRow(Job(JobState.Rendering));
+
+        Assert.Equal("Getting it ready", row.StateText);
+        Assert.True(row.ProgressIsUnknown);
+    }
+
+    [Fact]
+    public void A_note_shows_without_counting_as_a_problem()
+    {
+        var row = new JobRow(Job(JobState.Completed) with { Note = "The original was sent." });
+
+        Assert.Equal("The original was sent.", row.Detail);
+        Assert.False(row.IsProblem);
+    }
 
     private JobRow RowFor(UploadJob job)
     {

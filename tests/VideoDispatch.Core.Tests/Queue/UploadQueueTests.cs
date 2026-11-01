@@ -1012,6 +1012,156 @@ public sealed class UploadQueueTests : IAsyncDisposable
     }
 
     [Fact]
+    public async Task Rendering_shows_its_progress_on_the_job()
+    {
+        var render = new RecordingRender();
+        var at = new TaskCompletionSource();
+        var carryOn = new TaskCompletionSource();
+        render.Work = async (progress, _) =>
+        {
+            progress?.Report(40);
+            at.TrySetResult();
+            await carryOn.Task;
+        };
+        _queue = NewQueue(render);
+        _queue.Start();
+        var job = Add(YouTube());
+
+        await at.Task.WaitAsync(Patience);
+        var rendering = await UntilAsync(job.Id, current => current.BytesSent > 0);
+
+        Assert.Equal(JobState.Rendering, rendering.State);
+        Assert.Equal(400, rendering.BytesSent);
+
+        carryOn.SetResult();
+        await UntilStateAsync(job.Id, JobState.Completed);
+    }
+
+    [Fact]
+    public async Task A_rendered_file_changes_what_counts_as_the_whole_upload_and_goes_once_the_platform_has_it()
+    {
+        var rendered = Path.Combine(_folder, "rendered.mp4");
+        File.WriteAllBytes(rendered, new byte[300]);
+        var render = new RecordingRender(rendered);
+        _queue = NewQueue(render);
+        var total = new TaskCompletionSource<long>();
+        _youTube.Upload = (job, _, _) =>
+        {
+            total.TrySetResult(job.TotalBytes);
+            return Task.FromResult(new UploadReceipt("video-1"));
+        };
+        _queue.Start();
+        var job = Add(YouTube());
+
+        Assert.Equal(300, await total.Task.WaitAsync(Patience));
+        await UntilStateAsync(job.Id, JobState.Completed);
+
+        Assert.Equal(rendered, Assert.Single(render.Released));
+    }
+
+    [Fact]
+    public async Task A_note_from_rendering_stays_on_the_job_and_the_source_is_not_rendered_again()
+    {
+        var render = new RecordingRender { Note = "The original was sent." };
+        _queue = NewQueue(render);
+        var tries = 0;
+        _youTube.Upload = (job, _, _) => Interlocked.Increment(ref tries) == 1
+            ? throw new UploadException(Platform.YouTube, UploadFailureKind.Retryable, "Try again.")
+            : Task.FromResult(new UploadReceipt("video-1"));
+        _queue.Start();
+        var job = Add(YouTube());
+
+        await UntilStateAsync(job.Id, JobState.Waiting);
+        _queue.Retry(job.Id);
+        var done = await UntilStateAsync(job.Id, JobState.Completed);
+
+        Assert.Equal("The original was sent.", done.Note);
+        Assert.True(done.KeptSource);
+        Assert.Single(render.StatesSeen);
+    }
+
+    [Fact]
+    public async Task A_rendered_file_that_went_missing_is_made_again_and_its_old_session_dropped()
+    {
+        var rendered = Path.Combine(_folder, "rendered.mp4");
+        var render = new RecordingRender(rendered);
+        var saved = Saved(JobState.Queued) with { RenderedPath = rendered };
+        _store.Saved[saved.Id] = saved;
+        _sessions.Save(saved.Id, "https://www.googleapis.com/session");
+        _queue = NewQueue(render);
+        render.Work = (_, _) =>
+        {
+            File.WriteAllBytes(rendered, new byte[10]);
+            return Task.CompletedTask;
+        };
+
+        _queue.Start();
+        await UntilStateAsync(saved.Id, JobState.Completed);
+
+        Assert.Single(render.StatesSeen);
+        Assert.Null(_sessions.Get(saved.Id));
+    }
+
+    [Fact]
+    public async Task A_rendered_file_stays_while_the_other_platform_still_wants_it()
+    {
+        var rendered = Path.Combine(_folder, "rendered.mp4");
+        File.WriteAllBytes(rendered, new byte[300]);
+        var render = new RecordingRender(rendered);
+        _queue = NewQueue(render);
+        var holdTikTok = new TaskCompletionSource();
+        _tikTok.Upload = async (job, _, _) =>
+        {
+            await holdTikTok.Task;
+            return new UploadReceipt("publish-1");
+        };
+        _queue.Start();
+        var jobs = _queue.Add(_video, null, [TikTok(), YouTube()]);
+        var youTubeJob = jobs.Single(job => job.Platform == Platform.YouTube);
+        var tikTokJob = jobs.Single(job => job.Platform == Platform.TikTok);
+
+        await UntilStateAsync(youTubeJob.Id, JobState.Completed);
+        Assert.Empty(render.Released);
+
+        holdTikTok.SetResult();
+        await UntilStateAsync(tikTokJob.Id, JobState.Completed);
+        Assert.Single(render.Released);
+    }
+
+    [Fact]
+    public async Task Removing_a_job_lets_its_rendered_file_go()
+    {
+        var rendered = Path.Combine(_folder, "rendered.mp4");
+        var render = new RecordingRender();
+        var saved = Saved(JobState.Failed) with { RenderedPath = rendered };
+        _store.Saved[saved.Id] = saved;
+        _queue = NewQueue(render);
+        _queue.Start();
+
+        _queue.Remove(saved.Id);
+        await SettleAsync();
+
+        Assert.Equal(rendered, Assert.Single(render.Released));
+    }
+
+    [Fact]
+    public void Starting_tidies_away_rendered_files_only_finished_jobs_had()
+    {
+        var waiting = Saved(JobState.Waiting) with { RenderedPath = "waiting.mp4" };
+        var sent = Saved(JobState.Processing, remoteId: "video-1") with { RenderedPath = "sent.mp4" };
+        var done = Saved(JobState.Completed) with { RenderedPath = "done.mp4" };
+        _store.Saved[waiting.Id] = waiting;
+        _store.Saved[sent.Id] = sent;
+        _store.Saved[done.Id] = done;
+        var render = new RecordingRender();
+        _queue = NewQueue(render);
+
+        _queue.Start();
+
+        Assert.Equal(["waiting.mp4"], render.TidiedKeeping);
+    }
+
+    [Fact]
     public async Task Pass_through_rendering_publishes_the_source()
     {
         var seen = new TaskCompletionSource<UploadJob>();

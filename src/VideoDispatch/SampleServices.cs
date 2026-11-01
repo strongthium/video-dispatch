@@ -9,6 +9,7 @@ using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
 using VideoDispatch.Core.Queue;
+using VideoDispatch.Core.Reencoding;
 using VideoDispatch.Core.Uploads;
 using VideoDispatch.Core.YouTube;
 
@@ -43,7 +44,7 @@ public static class SampleServices
             [new SampleUploader(Platform.TikTok), new SampleUploader(Platform.YouTube)],
             new MemorySessions(),
             youTube,
-            new PassThroughRenderStep(),
+            new SampleRenderStep(),
             accounts.GetStatus,
             TimeProvider.System);
 
@@ -69,7 +70,15 @@ public static class SampleServices
                 },
             ]));
 
-        return new Services(accounts, platforms.ApproveAsync, queue, presets, youTube, _ => SampleVideo);
+        return new Services(
+            accounts,
+            platforms.ApproveAsync,
+            queue,
+            presets,
+            youTube,
+            _ => SampleVideo,
+            new AppSettingsStore(null),
+            (_, _) => Task.FromResult(new FfmpegInfo("ffmpeg, in the sample", true)));
     }
 
     private static IEnumerable<UploadJob> SampleJobs()
@@ -120,6 +129,34 @@ public static class SampleServices
             },
             Job("summit.mp4", Video("Summit day"), JobState.Queued, TimeSpan.FromMinutes(10)),
         ];
+    }
+
+    /// <summary>Takes about as long as a short video might, and changes nothing.</summary>
+    private sealed class SampleRenderStep : IRenderStep
+    {
+        public async Task<RenderResult> RenderAsync(UploadJob job, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+        {
+            if (job.Details.Encode is null)
+            {
+                return new RenderResult(null);
+            }
+
+            for (var percent = 0; percent < 100; percent += 2)
+            {
+                progress?.Report(percent);
+                await Task.Delay(200, cancellationToken);
+            }
+
+            return new RenderResult(null, "In the sample, nothing is really re-encoded.");
+        }
+
+        public void Release(string path)
+        {
+        }
+
+        public void Tidy(IReadOnlyCollection<string> stillNeeded)
+        {
+        }
     }
 
     private sealed class MemoryRecords<T>(IEnumerable<T>? initial = null) : IRecordStore<T>

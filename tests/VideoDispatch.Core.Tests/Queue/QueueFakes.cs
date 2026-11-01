@@ -150,9 +150,27 @@ internal sealed class RecordingRender(string? rendered = null) : IRenderStep
 {
     public List<JobState> StatesSeen { get; } = [];
 
-    public Task<string?> RenderAsync(UploadJob job, CancellationToken cancellationToken = default)
+    public ConcurrentQueue<string> Released { get; } = new();
+
+    public IReadOnlyCollection<string>? TidiedKeeping { get; private set; }
+
+    public string? Note { get; set; }
+
+    /// <summary>What rendering does before it finishes. By default it finishes at once.</summary>
+    public Func<IProgress<double>?, CancellationToken, Task> Work { get; set; } = (_, _) => Task.CompletedTask;
+
+    public async Task<RenderResult> RenderAsync(UploadJob job, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
     {
-        StatesSeen.Add(job.State);
-        return Task.FromResult(rendered);
+        lock (StatesSeen)
+        {
+            StatesSeen.Add(job.State);
+        }
+
+        await Work(progress, cancellationToken);
+        return new RenderResult(rendered, Note);
     }
+
+    public void Release(string path) => Released.Enqueue(path);
+
+    public void Tidy(IReadOnlyCollection<string> stillNeeded) => TidiedKeeping = stillNeeded;
 }

@@ -44,6 +44,12 @@
             <TextBlock Text="Accounts" Margin="13,0,0,0" />
           </StackPanel>
         </RadioButton>
+        <RadioButton x:Name="SettingsPlace" Style="{StaticResource PlaceItem}" GroupName="Places" Tag="settings" Checked="Place_Checked" AutomationProperties.Name="Settings">
+          <StackPanel Orientation="Horizontal">
+            <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="18" />
+            <TextBlock Text="Settings" Margin="13,0,0,0" />
+          </StackPanel>
+        </RadioButton>
       </StackPanel>
     </DockPanel>
 

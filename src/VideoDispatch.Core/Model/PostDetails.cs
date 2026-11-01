@@ -1,4 +1,5 @@
 using System.Text.Json.Serialization;
+using VideoDispatch.Core.Reencoding;
 
 namespace VideoDispatch.Core.Model;
 
@@ -9,6 +10,9 @@ public abstract record PostDetails
 {
     [JsonIgnore]
     public abstract Platform Platform { get; }
+
+    /// <summary>What to do to the video before sending it. Null sends the file as it is.</summary>
+    public EncodeSettings? Encode { get; init; }
 }
 
 /// <summary>

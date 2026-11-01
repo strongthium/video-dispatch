@@ -137,6 +137,7 @@ public sealed class JobRow(UploadJob job) : INotifyPropertyChanged
     public string StateText => _job.State switch
     {
         JobState.Queued => "Waiting its turn",
+        JobState.Rendering when _job.Details.Encode is not null => string.Format(CultureInfo.CurrentCulture, "Re-encoding: {0:0}%", Percent),
         JobState.Rendering => "Getting it ready",
         JobState.Uploading => $"Uploading: {Mb(_job.BytesSent)} of {Mb(_job.TotalBytes)}",
         JobState.Processing when _job.Platform == Platform.TikTok => "TikTok is processing it",
@@ -163,6 +164,11 @@ public sealed class JobRow(UploadJob job) : INotifyPropertyChanged
                 notes.Add(error!);
             }
 
+            if (_job.Note is { } note)
+            {
+                notes.Add(note);
+            }
+
             if (_job.Warning is { } warning)
             {
                 notes.Add(warning);
@@ -183,7 +189,7 @@ public sealed class JobRow(UploadJob job) : INotifyPropertyChanged
 
     public bool ShowsProgress => _job.State is JobState.Uploading or JobState.Rendering or JobState.Processing;
 
-    public bool ProgressIsUnknown => _job.State is not JobState.Uploading;
+    public bool ProgressIsUnknown => _job.State is not JobState.Uploading && !(_job.State == JobState.Rendering && _job.Details.Encode is not null);
 
     public double Percent => _job.TotalBytes > 0 ? Math.Min(100, _job.BytesSent * 100.0 / _job.TotalBytes) : 0;
 

@@ -138,6 +138,8 @@ public sealed class UploadQueue : IAsyncDisposable
             }
         }
 
+        _render.Tidy(load.Items.Where(job => job.RenderedPath is not null && job.RemoteId is null && job.State != JobState.Completed).Select(job => job.RenderedPath!).ToList());
+
         _stop.Token.Register(() => _stopped.TrySetResult());
         lock (_lock)
         {
@@ -305,6 +307,7 @@ public sealed class UploadQueue : IAsyncDisposable
             SaveFailed?.Invoke(exception.Message);
         }
 
+        ReleaseRendered(removed);
         JobChanged?.Invoke(removed);
     }
 
@@ -516,11 +519,26 @@ public sealed class UploadQueue : IAsyncDisposable
         try
         {
             var job = queued;
-            if (job.RenderedPath is null)
+
+            // A rendered file that's gone has to be made again, and a session for the old one can't carry on with new bytes.
+            if (job.RenderedPath is { } made && !File.Exists(made))
             {
-                job = Change(job.Id, current => current with { State = JobState.Rendering, NextAttemptAt = null }) ?? job;
-                var rendered = await _render.RenderAsync(job, cancellationToken);
-                job = Change(job.Id, current => current with { RenderedPath = rendered }) ?? job;
+                ForgetSession(job.Id);
+                job = Change(job.Id, current => current with { RenderedPath = null }) ?? job;
+            }
+
+            if (job.RenderedPath is null && !job.KeptSource)
+            {
+                job = Change(job.Id, current => current with { State = JobState.Rendering, NextAttemptAt = null, BytesSent = 0 }) ?? job;
+                var result = await _render.RenderAsync(job, new RenderProgress(new ProgressReporter(this, job.Id), job.TotalBytes), cancellationToken);
+                var renderedSize = result.Path is { } path && File.Exists(path) ? new FileInfo(path).Length : (long?)null;
+                job = Change(job.Id, current => current with
+                {
+                    RenderedPath = result.Path,
+                    KeptSource = result.Path is null,
+                    Note = result.Note,
+                    TotalBytes = renderedSize ?? current.TotalBytes,
+                }) ?? job;
             }
 
             job = Change(job.Id, current => current with { State = JobState.Uploading, NextAttemptAt = null, BytesSent = 0 }) ?? job;
@@ -528,7 +546,7 @@ public sealed class UploadQueue : IAsyncDisposable
             var receipt = await lane.Uploader.UploadAsync(job, new ProgressReporter(this, job.Id), cancellationToken);
             var now = _time.GetUtcNow();
 
-            Change(job.Id, current => current with
+            job = Change(job.Id, current => current with
             {
                 State = JobState.Processing,
                 RemoteId = receipt.RemoteId,
@@ -537,13 +555,15 @@ public sealed class UploadQueue : IAsyncDisposable
                 NextAttemptAt = now,
                 BytesSent = current.TotalBytes,
                 LastError = null,
-            });
+            }) ?? job;
 
             // The video has arrived, so stopping it now can only mean stopping following it.
             lock (_lock)
             {
                 _cancelling.Remove(job.Id);
             }
+
+            ReleaseRendered(job);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -568,6 +588,32 @@ public sealed class UploadQueue : IAsyncDisposable
                 lane.Uploading = false;
             }
         }
+    }
+
+    /// <summary>A rendered file goes once the platform has it, unless another job from the same video still wants it.</summary>
+    private void ReleaseRendered(UploadJob job)
+    {
+        if (job.RenderedPath is not { } path)
+        {
+            return;
+        }
+
+        lock (_lock)
+        {
+            var wanted = _jobs.Values.Any(other =>
+                other.Id != job.Id &&
+                other.BatchId == job.BatchId &&
+                other.Details.Encode == job.Details.Encode &&
+                other.RemoteId is null &&
+                other.State is not (JobState.Completed or JobState.Cancelled));
+
+            if (wanted)
+            {
+                return;
+            }
+        }
+
+        _render.Release(path);
     }
 
     private void OnUploadFailed(Lane lane, Guid id, UploadException failure)
@@ -852,6 +898,12 @@ public sealed class UploadQueue : IAsyncDisposable
                 queue.JobChanged?.Invoke(changed);
             }
         }
+    }
+
+    /// <summary>Rendering shows on the same progress bar as uploading, so percent becomes bytes of the source.</summary>
+    private sealed class RenderProgress(ProgressReporter reporter, long total) : IProgress<double>
+    {
+        public void Report(double value) => reporter.Report((long)(total * Math.Clamp(value, 0, 100) / 100));
     }
 
     private sealed class Lane(IVideoUploader uploader)
