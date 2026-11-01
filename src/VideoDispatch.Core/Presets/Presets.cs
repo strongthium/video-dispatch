@@ -12,6 +12,9 @@ public sealed record TikTokPreset
     public required string Name { get; init; }
     public string CaptionTemplate { get; init; } = "{title}";
     public IReadOnlyList<string> Hashtags { get; init; } = [];
+
+    /// <summary>What a screen reader says for this preset in a list.</summary>
+    public override string ToString() => Name;
 }
 
 public sealed record YouTubePreset
@@ -26,6 +29,9 @@ public sealed record YouTubePreset
     public bool? MadeForKids { get; init; }
     public string? PlaylistId { get; init; }
     public YouTubeSchedule? Schedule { get; init; }
+
+    /// <summary>What a screen reader says for this preset in a list.</summary>
+    public override string ToString() => Name;
 }
 
 /// <summary>A publish time relative to the day the video is queued, in the user's time zone.</summary>

@@ -29,6 +29,12 @@ public sealed class AccountPanel(
     /// <summary>The keys were saved, so the view must empty its password box.</summary>
     public event EventHandler? SecretAccepted;
 
+    /// <summary>A sign-in succeeded, so anything waiting on this account can carry on.</summary>
+    public event Action<Platform>? Connected;
+
+    /// <summary>The account went away, or its permissions may have changed.</summary>
+    public event Action<Platform>? AccountChanged;
+
     public string Title => platform.ToString();
 
     public string ClientIdLabel => platform == Platform.TikTok ? "Client key" : "Client ID";
@@ -184,6 +190,8 @@ public sealed class AccountPanel(
 
             await ReadAsync();
             _wantsPlaylists = HasPlaylistPermission;
+            Connected?.Invoke(platform);
+            AccountChanged?.Invoke(platform);
             return wanted && !HasPlaylistPermission
                 ? "Connected, but the playlist permission wasn't granted, so playlists stay off."
                 : null;
@@ -197,6 +205,7 @@ public sealed class AccountPanel(
         var revoked = await Task.Run(() => accounts.DisconnectAsync(platform, cancellationToken), cancellationToken);
         await ReadAsync();
         _wantsPlaylists = false;
+        AccountChanged?.Invoke(platform);
         if (revoked)
         {
             return "Disconnected.";

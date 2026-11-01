@@ -431,13 +431,9 @@ public class AccountPanelTests
     [InlineData(Platform.YouTube, "Sample Channel")]
     public async Task The_sample_mode_signs_in_with_the_real_flow_and_no_network(Platform platform, string name)
     {
-        var (accounts, openBrowser) = SampleAccounts.Create();
-        var panel = new AccountPanel(accounts, platform, openBrowser);
-        panel.ClientId = "sample-key";
-        panel.ClientSecret = "sample-secret";
-        await panel.SaveKeysAsync();
-
-        await panel.ConnectAsync();
+        var services = await SampleServices.CreateAsync();
+        var panel = new AccountPanel(services.Accounts, platform, services.OpenBrowser);
+        await panel.LoadAsync();
 
         Assert.Equal($"Connected as {name}", panel.StateText);
 
@@ -445,5 +441,24 @@ public class AccountPanelTests
 
         Assert.Equal(ConnectionState.NotConnected, panel.State);
         Assert.False(panel.ShowsRevokeLink);
+
+        await panel.ConnectAsync();
+
+        Assert.Equal($"Connected as {name}", panel.StateText);
+    }
+
+    [Fact]
+    public async Task Connecting_tells_whoever_is_waiting_on_the_account()
+    {
+        var services = await SampleServices.CreateAsync();
+        var panel = new AccountPanel(services.Accounts, Platform.YouTube, services.OpenBrowser);
+        await panel.LoadAsync();
+        await panel.DisconnectAsync();
+        var told = new List<Platform>();
+        panel.Connected += told.Add;
+
+        await panel.ConnectAsync();
+
+        Assert.Equal([Platform.YouTube], told);
     }
 }

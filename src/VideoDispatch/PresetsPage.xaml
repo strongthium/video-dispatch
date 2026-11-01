@@ -1,0 +1,104 @@
+<UserControl x:Class="VideoDispatch.App.PresetsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+    <StackPanel Margin="36,26,36,16">
+      <TextBlock Text="Presets" Style="{StaticResource PageTitle}" />
+      <TextBlock Style="{StaticResource Muted}" FontSize="14" Margin="0,2,0,20"
+                 Text="Text you use again and again. Templates can use {title}, {filename} and {date}. Everything stays editable for each post." />
+
+      <!-- TikTok: text only, by TikTok's own rules -->
+      <Border Style="{StaticResource Card}" Margin="0,0,0,16" DataContext="{Binding TikTok}">
+        <StackPanel>
+          <TextBlock Text="TikTok" Style="{StaticResource Heading}" />
+          <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0"
+                     Text="Only text can be kept here. TikTok's rules say privacy, comments, Duet, Stitch and commercial content must be set for each post." />
+          <DockPanel Margin="0,10,0,0">
+            <Button DockPanel.Dock="Right" Content="New" Click="NewTikTok_Click" Margin="8,0,0,0" />
+            <ComboBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" DisplayMemberPath="Name" AutomationProperties.Name="TikTok presets" />
+          </DockPanel>
+          <TextBlock Text="Name" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="TikTok preset name" />
+          <TextBlock Text="Caption" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding CaptionTemplate, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="56" AutomationProperties.Name="TikTok caption template" />
+          <TextBlock Text="{Binding VariablesProblem}" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                     Visibility="{Binding HasVariablesProblem, Converter={StaticResource VisibleIf}}" />
+          <TextBlock Text="Hashtags, separated by spaces" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding Hashtags, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="TikTok hashtags" />
+          <TextBlock Style="{StaticResource Caption}" Margin="0,10,0,0">
+            <Run Text="For a video called Holiday clip: " /><Run Text="{Binding Example_, Mode=OneWay}" />
+          </TextBlock>
+          <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <Button Content="Save" Click="SaveTikTok_Click" IsEnabled="{Binding CanSave}" />
+            <Button Content="Delete" Click="DeleteTikTok_Click" Margin="8,0,0,0" IsEnabled="{Binding HasSelection}" />
+            <TextBlock Text="{Binding Message}" VerticalAlignment="Center" Margin="12,0,0,0" Visibility="{Binding HasMessage, Converter={StaticResource VisibleIf}}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+
+      <!-- YouTube -->
+      <Border Style="{StaticResource Card}" Margin="0,0,0,16" DataContext="{Binding YouTube}">
+        <StackPanel>
+          <TextBlock Text="YouTube" Style="{StaticResource Heading}" />
+          <DockPanel Margin="0,10,0,0">
+            <Button DockPanel.Dock="Right" Content="New" Click="NewYouTube_Click" Margin="8,0,0,0" />
+            <ComboBox ItemsSource="{Binding Items}" SelectedItem="{Binding Selected}" DisplayMemberPath="Name" AutomationProperties.Name="YouTube presets" />
+          </DockPanel>
+          <TextBlock Text="Name" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="YouTube preset name" />
+          <TextBlock Text="Title" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding TitleTemplate, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="YouTube title template" />
+          <TextBlock Text="Description" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding DescriptionTemplate, UpdateSourceTrigger=PropertyChanged}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="64" AutomationProperties.Name="YouTube description template" />
+          <TextBlock Text="{Binding VariablesProblem}" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                     Visibility="{Binding HasVariablesProblem, Converter={StaticResource VisibleIf}}" />
+          <TextBlock Text="Tags, separated by commas" Style="{StaticResource Caption}" Margin="0,10,0,4" />
+          <TextBox Text="{Binding Tags, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="YouTube preset tags" />
+
+          <Grid Margin="0,10,0,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="16" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <StackPanel>
+              <TextBlock Text="Privacy" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+              <ComboBox ItemsSource="{Binding Privacies}" SelectedValue="{Binding PrivacyId, TargetNullValue=''}" SelectedValuePath="Id" DisplayMemberPath="Title" HorizontalAlignment="Stretch" AutomationProperties.Name="Preset privacy" />
+            </StackPanel>
+            <StackPanel Grid.Column="2">
+              <TextBlock Text="Made for kids" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+              <ComboBox ItemsSource="{Binding MadeForKidsChoices}" SelectedValue="{Binding MadeForKidsId, TargetNullValue=''}" SelectedValuePath="Id" DisplayMemberPath="Title" HorizontalAlignment="Stretch" AutomationProperties.Name="Preset made for kids" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Margin="0,10,0,0">
+              <TextBlock Text="Category" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+              <ComboBox ItemsSource="{Binding Categories}" SelectedValue="{Binding CategoryId, TargetNullValue=''}" SelectedValuePath="Id" DisplayMemberPath="Title" HorizontalAlignment="Stretch" AutomationProperties.Name="Preset category" />
+            </StackPanel>
+            <StackPanel Grid.Row="1" Grid.Column="2" Margin="0,10,0,0">
+              <TextBlock Text="Playlist" Style="{StaticResource Caption}" Margin="0,0,0,4" />
+              <ComboBox ItemsSource="{Binding Playlists}" SelectedValue="{Binding PlaylistId, TargetNullValue=''}" SelectedValuePath="Id" DisplayMemberPath="Title" HorizontalAlignment="Stretch" AutomationProperties.Name="Preset playlist" />
+            </StackPanel>
+          </Grid>
+
+          <CheckBox Content="Schedule when it goes public" IsChecked="{Binding Scheduled}" Margin="0,14,0,0" />
+          <StackPanel Margin="0,8,0,0" Orientation="Horizontal" Visibility="{Binding Scheduled, Converter={StaticResource VisibleIf}}">
+            <TextBox Text="{Binding DaysAhead, UpdateSourceTrigger=PropertyChanged}" Width="64" AutomationProperties.Name="Days ahead" />
+            <TextBlock Text="days after queueing, at" VerticalAlignment="Center" Margin="8,0" />
+            <TextBox Text="{Binding ScheduleTime, UpdateSourceTrigger=PropertyChanged}" Width="90" AutomationProperties.Name="Preset schedule time" />
+          </StackPanel>
+          <TextBlock Text="{Binding ExtraProblem}" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{DynamicResource SystemFillColorCriticalBrush}"
+                     Visibility="{Binding HasExtraProblem, Converter={StaticResource VisibleIf}}" />
+
+          <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+            <Button Content="Save" Click="SaveYouTube_Click" IsEnabled="{Binding CanSave}" />
+            <Button Content="Delete" Click="DeleteYouTube_Click" Margin="8,0,0,0" IsEnabled="{Binding HasSelection}" />
+            <TextBlock Text="{Binding Message}" VerticalAlignment="Center" Margin="12,0,0,0" Visibility="{Binding HasMessage, Converter={StaticResource VisibleIf}}" />
+          </StackPanel>
+        </StackPanel>
+      </Border>
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

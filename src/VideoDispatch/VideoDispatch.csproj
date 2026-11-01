@@ -7,6 +7,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>video-dispatch</AssemblyName>
     <RootNamespace>VideoDispatch.App</RootNamespace>
+    <ApplicationIcon>Assets\video-dispatch.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <!-- Program.Main starts the App: it reads the command line first. -->
     <EnableDefaultApplicationDefinition>false</EnableDefaultApplicationDefinition>
@@ -17,6 +18,11 @@
   <!-- WPF leaves System.IO out of the implicit usings (it has a Path of its own, in Shapes). -->
   <ItemGroup>
     <Using Include="System.IO" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\video-dispatch.png" />
+    <Resource Include="Assets\strongthium-banner.jpg" />
   </ItemGroup>
 
   <ItemGroup>
