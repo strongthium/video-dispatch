@@ -11,6 +11,13 @@ public sealed record UploadJob
     public required Guid Id { get; init; }
     public required Guid BatchId { get; init; }
     public required string SourcePath { get; init; }
+
+    /// <summary>The source file's size when queued. A file changed since then fails rather than uploading a corrupt mix.</summary>
+    public required long SourceLength { get; init; }
+
+    /// <summary>The source file's last write time when queued.</summary>
+    public required DateTimeOffset SourceLastWriteUtc { get; init; }
+
     public required PostDetails Details { get; init; }
     public required DateTimeOffset CreatedAt { get; init; }
 

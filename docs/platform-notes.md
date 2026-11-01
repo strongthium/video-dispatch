@@ -1,6 +1,6 @@
 # Platform notes
 
-What the code relies on from each platform's official docs, last read on 2026-10-31. These rules change, so recheck the source before relying on a detail.
+What the code relies on from each platform's official docs, last read on 2026-10-31, and the TikTok upload pages on 2026-11-01. These rules change, so recheck the source before relying on a detail.
 
 ## TikTok
 
@@ -19,6 +19,10 @@ What the code relies on from each platform's official docs, last read on 2026-10
 - Each chunk is 5-64 MB and the final chunk can reach 128 MB, with 1-1000 chunks sent in order.
 - A file under 5 MB goes in one request with `chunk_size` set to the file size. A file over 64 MB must be split.
 - `upload_url` is valid for one hour. An expired URL returns 403, an unknown one 404, and a range mismatch 416.
+- Every chunk but the last returns 206, and only 201 means the whole file arrived. A 400 means malformed headers or a wrong `Content-Length`. A 5xx means retry the same chunk.
+- The response carries `Content-Range: bytes 0-{UPLOADED_BYTES}/{TOTAL_BYTE_LENGTH}`. The docs don't say whether that number is a position or a count, so the app accepts either and starts over only if it's behind the chunk just sent.
+- The docs give **no way to resume**, and don't say how to recover from a 416. So the app starts again under a new init, once per upload. Whether an abandoned init counts against the 5 pending shares isn't stated.
+- The docs don't say whether MB is decimal or binary, though the media guide's own example (4 MB is 4,194,304 bytes) reads as binary. The 16 MiB chunks are inside the limits either way. The 4 GB limit is checked as binary, so TikTok's own answer settles a file between 4,000,000,000 bytes and 4 GiB.
 
 ### Video limits
 
@@ -29,6 +33,9 @@ MP4 (recommended), WebM or MOV. H.264 (recommended), H.265, VP8 or VP9. 23-60 FP
 - `POST /v2/post/publish/status/fetch/` with `publish_id`, 30 requests per minute per token.
 - Statuses: `PROCESSING_UPLOAD`, `SEND_TO_USER_INBOX`, `PUBLISH_COMPLETE` (in inbox mode, the creator posted the draft) and `FAILED`.
 - `internal` is the fail reason TikTok says to retry. `auth_removed`, `spam_risk`, `spam_risk_text` and `spam_risk_user_banned_from_posting` must not be retried.
+- `spam_risk_too_many_posts` means the creator passed the API's posting limit in 24 hours, so the app waits. The format, duration, frame rate and picture size failures don't state whether to retry, and the app treats them as final, since the same file would fail the same way.
+- Processing has no guaranteed time limit. The docs give averages of under 30 seconds for 512 MB, about a minute for 1 GB, and over two minutes for 4 GB.
+- The field names on this page are `error.log_id`, while the upload page says `error.logid` in its table. The app doesn't read either.
 
 ### Sign-in
 

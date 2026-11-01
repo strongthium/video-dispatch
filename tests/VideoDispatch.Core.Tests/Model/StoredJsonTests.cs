@@ -17,6 +17,8 @@ public class StoredJsonTests
         Id = Guid.NewGuid(),
         BatchId = Guid.NewGuid(),
         SourcePath = "clip.mp4",
+        SourceLength = 1234,
+        SourceLastWriteUtc = new DateTimeOffset(2026, 10, 30, 8, 15, 30, TimeSpan.Zero).AddTicks(1234567),
         Details = details,
         CreatedAt = new DateTimeOffset(2026, 10, 31, 12, 0, 0, TimeSpan.Zero),
     };

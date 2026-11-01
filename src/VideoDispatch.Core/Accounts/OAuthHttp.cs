@@ -141,7 +141,7 @@ internal static class OAuthHttp
     private static string Shorten(string text) =>
         text.Length > MaxServerMessageLength ? text[..MaxServerMessageLength] : text;
 
-    private static JsonElement? TryParse(string body)
+    public static JsonElement? TryParse(string body)
     {
         if (string.IsNullOrWhiteSpace(body))
         {
