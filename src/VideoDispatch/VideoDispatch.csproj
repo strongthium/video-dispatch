@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- video-dispatch: publishes video to TikTok and YouTube. In WPF with Windows' own Fluent theme, so the program itself
-       is small: everything it draws with is in the .NET Desktop Runtime. -->
+       is small: everything it draws with is in the .NET Desktop Runtime. Published as one file for x64 PCs that runs on
+       the .NET 10 Desktop Runtime installed on the PC: build.ps1 and .github/workflows/release.yml make it. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
@@ -14,6 +15,21 @@
     <!-- WPF0001: the Fluent theme is experimental in .NET 10. -->
     <NoWarn>$(NoWarn);WPF0001</NoWarn>
   </PropertyGroup>
+
+  <PropertyGroup Condition="'$(RuntimeIdentifier)' != ''">
+    <!-- The runtime isn't inside it: the .NET 10 Desktop Runtime on the PC runs it. -->
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+  <!-- A release is the one program: no debug symbols beside it. -->
+  <Target Name="LeaveOut" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(Extension)' == '.pdb'" />
+    </ItemGroup>
+  </Target>
 
   <!-- WPF leaves System.IO out of the implicit usings (it has a Path of its own, in Shapes). -->
   <ItemGroup>

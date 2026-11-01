@@ -119,14 +119,14 @@ public sealed class JsonFolderStore<T>(string folder) : IRecordStore<T>
 }
 
 /// <summary>Where the app keeps its files.</summary>
-public static class AppFolders
+public sealed record AppFolders(string Root)
 {
-    public static string Root { get; } =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "video-dispatch");
+    public static AppFolders ForThisUser { get; } =
+        new(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "video-dispatch"));
 
-    public static string Jobs => Path.Combine(Root, "jobs");
+    public string Jobs => Path.Combine(Root, "jobs");
 
-    public static string TikTokPresets => Path.Combine(Root, "presets-tiktok");
+    public string TikTokPresets => Path.Combine(Root, "presets-tiktok");
 
-    public static string YouTubePresets => Path.Combine(Root, "presets-youtube");
+    public string YouTubePresets => Path.Combine(Root, "presets-youtube");
 }

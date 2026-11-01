@@ -20,25 +20,35 @@ public sealed record Services(
     IYouTubeApi YouTube,
     Func<string, VideoMetadata?> ReadMetadata)
 {
-    private static readonly HttpClient SignInHttp = new();
+    public static Services CreateReal() =>
+        Create(new WindowsCredentialStore(), AppFolders.ForThisUser, Browser.OpenSignInAsync, handler => handler);
 
-    public static Services CreateReal()
+    /// <summary>The real parts, put together.</summary>
+    /// <param name="secrets">Keeps the keys, sign-ins and unfinished uploads.</param>
+    /// <param name="folders">Keeps the jobs and presets.</param>
+    /// <param name="openBrowser">Shows a sign-in page.</param>
+    /// <param name="network">Lets the end-to-end test send the real requests to its local servers.</param>
+    public static Services Create(
+        ISecretStore secrets,
+        AppFolders folders,
+        Func<Uri, CancellationToken, Task> openBrowser,
+        Func<HttpMessageHandler, HttpMessageHandler> network)
     {
         var time = TimeProvider.System;
-        var secrets = new WindowsCredentialStore();
+        var signIn = new HttpClient(network(new SocketsHttpHandler()));
         var accounts = new AccountService(
             secrets,
-            [new TikTokOAuthProvider(SignInHttp), new GoogleOAuthProvider(SignInHttp)],
+            [new TikTokOAuthProvider(signIn), new GoogleOAuthProvider(signIn)],
             time);
 
         // A chunk on a slow line can take far longer than the default timeout, and YouTube's "keep going" is a 308,
         // which isn't a redirect, so the upload clients have one of their own.
-        var uploads = new HttpClient(new SocketsHttpHandler { AllowAutoRedirect = false }) { Timeout = Timeout.InfiniteTimeSpan };
+        var uploads = new HttpClient(network(new SocketsHttpHandler { AllowAutoRedirect = false })) { Timeout = Timeout.InfiniteTimeSpan };
         var sessions = new SecretUploadSessionStore(secrets);
         var youTube = new YouTubeApi(uploads, accounts, time);
 
         var queue = new UploadQueue(
-            new JsonFolderStore<UploadJob>(AppFolders.Jobs),
+            new JsonFolderStore<UploadJob>(folders.Jobs),
             [new TikTokUploader(uploads, accounts, time), new YouTubeUploader(uploads, accounts, sessions, time)],
             sessions,
             youTube,
@@ -47,9 +57,9 @@ public sealed record Services(
             time);
 
         var presets = new PresetLibrary(
-            new JsonFolderStore<TikTokPreset>(AppFolders.TikTokPresets),
-            new JsonFolderStore<YouTubePreset>(AppFolders.YouTubePresets));
+            new JsonFolderStore<TikTokPreset>(folders.TikTokPresets),
+            new JsonFolderStore<YouTubePreset>(folders.YouTubePresets));
 
-        return new Services(accounts, Browser.OpenSignInAsync, queue, presets, youTube, Mp4MetadataReader.Read);
+        return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read);
     }
 }

@@ -1,6 +1,6 @@
 # Platform notes
 
-What the code relies on from each platform's official docs, last read on 2026-10-31, and the TikTok and YouTube upload pages on 2026-11-01. These rules change, so recheck the source before relying on a detail.
+What the code relies on from each platform's official docs, last read on 2026-10-31, and the TikTok and YouTube upload pages and the registration pages on 2026-11-01. These rules change, so recheck the source before relying on a detail.
 
 ## TikTok
 
@@ -55,6 +55,13 @@ MP4 (recommended), WebM or MOV. H.264 (recommended), H.265, VP8 or VP9. 23-60 FP
 - `client_secret` must not be embedded in open-source projects, and apps must not add watermarks or promotional branding.
 - The guidelines don't address apps that each user registers themselves, and an app must be approved for `video.upload`. Approval for an individual registration is not assured.
 - Unaudited clients are limited to 5 users per 24 hours and `SELF_ONLY` posts. These rules are written for Direct Post, and the page doesn't mention inbox upload.
+
+### Registering an app
+
+- A desktop redirect URI goes in Login Kit's product configuration. Up to 10 are allowed, each under 512 characters, and `http://127.0.0.1:*/callback/` is one of the docs' examples.
+- The app page needs an icon (1024 x 1024), name, category and description, and a website address for the Desktop platform. Apps created after 2024-09-09 must verify the terms of service, privacy policy and website addresses.
+- App review wants an explanation of each product and scope, and at least one demo video.
+- Sandbox mode needs no review, and works on up to 10 target accounts you own. It "does not offer access to Content Posting API for public videos". The page doesn't mention `video.upload`, so whether inbox uploads work there is unknown.
 
 ### Direct Post rules (not built yet)
 
@@ -128,6 +135,13 @@ There is no API setting. YouTube's help says square or vertical videos up to thr
 - The installed-apps guide doesn't say a loopback redirect may have a path, so the app uses `http://127.0.0.1:port` with none.
 - The same guide says `state` comes back in the URL fragment, which a local server can't see. The app reads it from the query string, as standard OAuth does. Confirm this at the first real sign-in.
 
+### Publishing status
+
+- In **Testing**, only listed test users can sign in, up to 100, and their authorizations and refresh tokens end after seven days. **Publish app** on the Audience page moves a project to **In production**, for any Google account.
+- Requesting sensitive or restricted scopes before verification shows the "unverified app" warning, and at most 100 new users can ever grant them. That cap can't be reset.
+- Verification is optional for an app for personal use with under 100 users, who may click through the warning.
+- The pages read don't say which class each YouTube scope falls in, so what the warning screen looks like for these scopes is still to be seen at the first real sign-in.
+
 ### Scopes
 
 From the [API discovery document](https://www.googleapis.com/discovery/v1/apis/youtube/v3/rest), revision 20261029:
@@ -153,6 +167,8 @@ The app always requests `youtube.upload` and `youtube.readonly`. Adding to a pla
 - [TikTok OAuth error handling](https://developers.tiktok.com/doc/oauth-error-handling)
 - [TikTok user info](https://developers.tiktok.com/doc/tiktok-api-v2-get-user-info)
 - [TikTok Content Sharing Guidelines](https://developers.tiktok.com/doc/content-sharing-guidelines)
+- [TikTok creating an app](https://developers.tiktok.com/doc/getting-started-create-an-app)
+- [TikTok sandbox](https://developers.tiktok.com/doc/add-a-sandbox)
 - [Google OAuth for installed apps](https://developers.google.com/youtube/v3/guides/auth/installed-apps)
 - [YouTube videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert)
 - [YouTube videos resource](https://developers.google.com/youtube/v3/docs/videos)
@@ -168,3 +184,6 @@ The app always requests `youtube.upload` and `youtube.readonly`. Adding to a pla
 - [YouTube Shorts help](https://support.google.com/youtube/answer/15424877)
 - [Google OAuth for native apps](https://developers.google.com/identity/protocols/oauth2/native-app)
 - [Google OAuth overview](https://developers.google.com/identity/protocols/oauth2)
+- [Google audience and publishing status](https://support.google.com/cloud/answer/15549945)
+- [Google OAuth app verification](https://support.google.com/cloud/answer/13463073)
+- [Google: when verification isn't needed](https://support.google.com/cloud/answer/13464323)

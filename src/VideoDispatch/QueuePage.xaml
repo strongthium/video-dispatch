@@ -20,25 +20,11 @@
           <DataTemplate>
             <Border Style="{StaticResource Card}" Margin="0,0,0,12" AutomationProperties.Name="{Binding Title}">
               <StackPanel>
-                <DockPanel>
-                  <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top" Margin="16,0,0,0">
-                    <Button Content="I've posted it" Click="MarkPosted_Click" Margin="0,0,8,0"
-                            Visibility="{Binding CanMarkPosted, Converter={StaticResource VisibleIf}}" />
-                    <Button Content="{Binding RetryText}" Click="Retry_Click" Margin="0,0,8,0"
-                            Visibility="{Binding CanRetry, Converter={StaticResource VisibleIf}}" />
-                    <Button Content="{Binding CancelText}" ToolTip="{Binding CancelHint}" Click="Cancel_Click"
-                            Visibility="{Binding CanCancel, Converter={StaticResource VisibleIf}}" />
-                    <Button Content="Remove" Click="Remove_Click"
-                            Visibility="{Binding CanRemove, Converter={StaticResource VisibleIf}}" />
-                  </StackPanel>
-                  <StackPanel>
-                    <TextBlock Text="{Binding Title}" Style="{StaticResource Heading}" TextTrimming="CharacterEllipsis" />
-                    <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0">
-                      <Run Text="{Binding PlatformText, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding FileText, Mode=OneWay}" />
-                    </TextBlock>
-                    <TextBlock Text="{Binding StateText}" TextWrapping="Wrap" Margin="0,6,0,0" />
-                  </StackPanel>
-                </DockPanel>
+                <TextBlock Text="{Binding Title}" Style="{StaticResource Heading}" TextTrimming="CharacterEllipsis" />
+                <TextBlock Style="{StaticResource Caption}" Margin="0,2,0,0">
+                  <Run Text="{Binding PlatformText, Mode=OneWay}" /><Run Text="  ·  " /><Run Text="{Binding FileText, Mode=OneWay}" />
+                </TextBlock>
+                <TextBlock Text="{Binding StateText}" TextWrapping="Wrap" Margin="0,6,0,0" />
 
                 <ProgressBar Margin="0,10,0,0" Maximum="100" Value="{Binding Percent, Mode=OneWay}" IsIndeterminate="{Binding ProgressIsUnknown}"
                              Visibility="{Binding ShowsProgress, Converter={StaticResource VisibleIf}}" />
@@ -67,6 +53,18 @@
                 <TextBlock Style="{StaticResource Caption}" Margin="0,8,0,0" Visibility="{Binding HasStudioLink, Converter={StaticResource VisibleIf}}">
                   <Hyperlink NavigateUri="{Binding StudioLink}" RequestNavigate="Link_RequestNavigate">Open in YouTube Studio</Hyperlink>
                 </TextBlock>
+
+                <!-- Under the text, because a job can have three buttons, which leave too little room beside it. -->
+                <WrapPanel Margin="0,12,0,0">
+                  <Button Content="I've posted it" Click="MarkPosted_Click" Margin="0,0,8,0"
+                          Visibility="{Binding CanMarkPosted, Converter={StaticResource VisibleIf}}" />
+                  <Button Content="{Binding RetryText}" Click="Retry_Click" Margin="0,0,8,0"
+                          Visibility="{Binding CanRetry, Converter={StaticResource VisibleIf}}" />
+                  <Button Content="{Binding CancelText}" ToolTip="{Binding CancelHint}" Click="Cancel_Click"
+                          Visibility="{Binding CanCancel, Converter={StaticResource VisibleIf}}" />
+                  <Button Content="Remove" Click="Remove_Click"
+                          Visibility="{Binding CanRemove, Converter={StaticResource VisibleIf}}" />
+                </WrapPanel>
               </StackPanel>
             </Border>
           </DataTemplate>

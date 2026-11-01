@@ -115,7 +115,7 @@ public static class SampleServices
             },
             Job("forest-loop.mp4", Video("Forest loop, part 2"), JobState.Waiting, TimeSpan.FromHours(1)) with
             {
-                NextAttemptAt = now.AddHours(6),
+                NextAttemptAt = YouTubeQuota.NextReset(now),
                 LastError = "Your Google project has used up its YouTube quota for today. This will wait until midnight Pacific time.",
             },
             Job("summit.mp4", Video("Summit day"), JobState.Queued, TimeSpan.FromMinutes(10)),

@@ -16,6 +16,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Compile Include="..\VideoDispatch.Core.Tests\Media\Mp4Builder.cs" Link="Mp4Builder.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\VideoDispatch\VideoDispatch.csproj" />
   </ItemGroup>
 
