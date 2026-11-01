@@ -156,7 +156,7 @@ A Google project gets 100 video uploads a day through YouTube's API, and its quo
 
 ## What hasn't been tried
 
-Everything has been tested against made-up platforms: 799 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
+Everything has been tested against made-up platforms: 800 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
 
 - A real sign-in or upload on TikTok or YouTube, or an app approval from TikTok.
 - A real video from a phone, rotated, through **New post**. Reading video details has been tried on real files, but rotation only on hand-built ones.
@@ -192,12 +192,12 @@ You need Windows and the [.NET 10 SDK](https://dotnet.microsoft.com/download).
 
 ```
 .\build.ps1                 # tests, then the program into public\  (or double-click build.cmd)
-.\build.ps1 -Bump patch     # the same as a new version: 1.0.0 -> 1.0.1
+.\build.ps1 -Bump revision  # the same as a new version: 1.0.0.0 -> 1.0.0.1
 ```
 
 `build.ps1` runs the tests (`-SkipTests` skips them), publishes the program, and replaces what's in [`public/`](public) with it, its `SHA256SUMS` and the `VERSION` it was built as.
 
-The version is in [`VERSION`](VERSION), `major.minor.patch`, and every build reads it. `-Bump major|minor|patch` or `-Version 2.0.0` builds a new one, and `VERSION` is changed once that build has succeeded, so the version in the repository is always the one in `public/`.
+The version is in [`VERSION`](VERSION), `major.minor.patch.revision`, and every build reads it. `-Bump major|minor|patch|revision` or `-Version 2.0.0.0` builds a new one, and `VERSION` is changed once that build has succeeded, so the version in the repository is always the one in `public/`.
 
 For working on it:
 
@@ -222,7 +222,7 @@ dotnet run --project src/VideoDispatch -- --sample
 
 1. runs the tests on Windows;
 2. builds the x64 program, one `.exe`;
-3. publishes release `v<VERSION>` with its zip and `SHA256SUMS`. A version is released once: to release again, raise it first (`build.ps1 -Bump patch`).
+3. publishes release `v<VERSION>` with its zip and `SHA256SUMS`. A version is released once: to release again, raise it first (`build.ps1 -Bump revision`).
 
 There's no `deploy` branch yet, so nothing has been released.
 

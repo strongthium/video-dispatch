@@ -8,7 +8,7 @@ namespace VideoDispatch.Core.Tests;
 public sealed class UpdaterTests : IDisposable
 {
     private const string Repository = "strongthium/video-dispatch";
-    private const string Downloads = "https://github.com/strongthium/video-dispatch/releases/download/v9.9.9/";
+    private const string Downloads = "https://github.com/strongthium/video-dispatch/releases/download/v9.9.9.9/";
 
     private readonly string _folder = Path.Combine(AppContext.BaseDirectory, "updater-" + Guid.NewGuid().ToString("N"));
 
@@ -41,8 +41,8 @@ public sealed class UpdaterTests : IDisposable
     {
         var updater = NewUpdater(_ => Json($$"""
             {
-              "tag_name": "v9.9.9",
-              "html_url": "https://github.com/{{Repository}}/releases/tag/v9.9.9",
+              "tag_name": "v9.9.9.9",
+              "html_url": "https://github.com/{{Repository}}/releases/tag/v9.9.9.9",
               "assets": [
                 { "name": "SHA256SUMS", "browser_download_url": "{{Downloads}}SHA256SUMS" },
                 { "name": "evil.zip", "browser_download_url": "https://elsewhere.test/evil.zip" }
@@ -52,7 +52,7 @@ public sealed class UpdaterTests : IDisposable
 
         var release = await updater.LatestAsync();
 
-        Assert.Equal(new Version(9, 9, 9), release.Version);
+        Assert.Equal(new Version(9, 9, 9, 9), release.Version);
         Assert.Equal(["SHA256SUMS"], release.Files.Keys);
     }
 
@@ -66,10 +66,12 @@ public sealed class UpdaterTests : IDisposable
         Assert.Contains("no release", failure.Message);
     }
 
-    [Fact]
-    public async Task Refuses_a_tag_that_isnt_a_version()
+    [Theory]
+    [InlineData("latest")]
+    [InlineData("v9.9.9")]
+    public async Task Refuses_a_tag_that_isnt_a_version(string tag)
     {
-        var updater = NewUpdater(_ => Json("""{"tag_name":"latest","html_url":"x","assets":[]}"""));
+        var updater = NewUpdater(_ => Json($$"""{"tag_name":"{{tag}}","html_url":"x","assets":[]}"""));
 
         await Assert.ThrowsAsync<InvalidDataException>(() => updater.LatestAsync());
     }
@@ -77,11 +79,11 @@ public sealed class UpdaterTests : IDisposable
     [Fact]
     public async Task Replaces_nothing_when_the_download_doesnt_match_its_checksum()
     {
-        var name = "video-dispatch-9.9.9-win-x64-needs-dotnet.zip";
+        var name = "video-dispatch-9.9.9.9-win-x64-needs-dotnet.zip";
         var updater = NewUpdater(request => request.RequestUri!.AbsoluteUri.EndsWith("SHA256SUMS", StringComparison.Ordinal)
             ? Json($"{new string('0', 64)}  {name}\n")
             : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(Zip("video-dispatch.exe", "new")) });
-        var release = new Release(new Version(9, 9, 9), "page", new Dictionary<string, string>
+        var release = new Release(new Version(9, 9, 9, 9), "page", new Dictionary<string, string>
         {
             [name] = Downloads + name,
             ["SHA256SUMS"] = Downloads + "SHA256SUMS",
@@ -97,13 +99,13 @@ public sealed class UpdaterTests : IDisposable
     [Fact]
     public async Task Installs_a_download_that_matches_and_keeps_the_old_one_beside_it()
     {
-        var name = "video-dispatch-9.9.9-win-x64-needs-dotnet.zip";
+        var name = "video-dispatch-9.9.9.9-win-x64-needs-dotnet.zip";
         var zip = Zip("video-dispatch.exe", "new");
         var hash = Convert.ToHexString(SHA256.HashData(zip));
         var updater = NewUpdater(request => request.RequestUri!.AbsoluteUri.EndsWith("SHA256SUMS", StringComparison.Ordinal)
             ? Json($"{hash}  {name}\n")
             : new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(zip) });
-        var release = new Release(new Version(9, 9, 9), "page", new Dictionary<string, string>
+        var release = new Release(new Version(9, 9, 9, 9), "page", new Dictionary<string, string>
         {
             [name] = Downloads + name,
             ["SHA256SUMS"] = Downloads + "SHA256SUMS",

@@ -29,7 +29,7 @@ public sealed partial class AboutPage : UserControl
     {
         InitializeComponent();
         ProgramIcon.Source = App.Icon;
-        VersionText.Text = $"Version {Updater.RunningVersion.ToString(3)}";
+        VersionText.Text = $"Version {Updater.RunningVersion.ToString(4)}";
         Loaded += async (_, _) =>
         {
             if (!_busy && (_asked is null || DateTime.UtcNow - _asked > AskAgainAfter))
@@ -102,11 +102,11 @@ public sealed partial class AboutPage : UserControl
             return;
         }
 
-        var latest = _release.Version.ToString(3);
+        var latest = _release.Version.ToString(4);
         NotesButton.Visibility = Visibility.Visible;
         if (_release.Version > Updater.RunningVersion)
         {
-            Show(Newer, $"Version {latest} is out. You have {Updater.RunningVersion.ToString(3)}.",
+            Show(Newer, $"Version {latest} is out. You have {Updater.RunningVersion.ToString(4)}.",
                 "Updating downloads it from GitHub, checks it against the release's checksums, replaces this program and starts it again.");
             UpdateButton.Content = $"Update to {latest} and restart";
             UpdateButton.Visibility = Visibility.Visible;
@@ -137,7 +137,7 @@ public sealed partial class AboutPage : UserControl
             return;
         }
 
-        var latest = _release.Version.ToString(3);
+        var latest = _release.Version.ToString(4);
         _busy = true;
         UpdateButton.Visibility = CheckButton.Visibility = Visibility.Collapsed;
         UpdateBar.IsIndeterminate = false;

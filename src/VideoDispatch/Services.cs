@@ -73,7 +73,7 @@ public sealed record Services(
             new JsonFolderStore<YouTubePreset>(folders.YouTubePresets));
 
         var downloads = new HttpClient(network(new SocketsHttpHandler())) { Timeout = Timeout.InfiniteTimeSpan };
-        downloads.DefaultRequestHeaders.UserAgent.ParseAdd($"video-dispatch/{Updater.RunningVersion.ToString(3)}");
+        downloads.DefaultRequestHeaders.UserAgent.ParseAdd($"video-dispatch/{Updater.RunningVersion.ToString(4)}");
         var ffmpeg = new FfmpegManager(settings, new FfmpegDownloader(downloads, folders.Ffmpeg), time);
 
         return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read, settings, ffmpeg, FfmpegVideoEncoder.InspectAsync);
