@@ -156,12 +156,12 @@ A Google project gets 100 video uploads a day through YouTube's API, and its quo
 
 ## What hasn't been tried
 
-Everything has been tested against made-up platforms: 798 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
+Everything has been tested against made-up platforms: 799 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
 
 - A real sign-in or upload on TikTok or YouTube, or an app approval from TikTok.
 - A real video from a phone, rotated, through **New post**. Reading video details has been tried on real files, but rotation only on hand-built ones.
-- Re-encoding real footage. Windows' tools have really encoded test videos, sideways ones included, but those are flat colours. So how it looks, how close **Fit a size** comes, and how long a long video takes are all still to be seen.
-- A real FFmpeg, or a real download of one. The app has only run a stand-in that answers the way FFmpeg's docs say, and fetched from a made-up site shaped like gyan.dev's real answers.
+- Re-encoding real footage. Both engines have really encoded test videos, including sideways ones, and **Fit a size** stayed under its limit on all of them, but those are made-up pictures. So how real footage looks, and how long a long video takes, are still to be seen.
+- **Download FFmpeg** pressed in the real app. The same download code has fetched and run the real build from gyan.dev, but from a test program, not from that button.
 - An edition of Windows without the media tools, such as N editions. Re-encoding there should say to install the Media Feature Pack or choose FFmpeg.
 - An update from a real release, because there's no release yet. The check for one has run against GitHub, and the update itself against made-up downloads.
 

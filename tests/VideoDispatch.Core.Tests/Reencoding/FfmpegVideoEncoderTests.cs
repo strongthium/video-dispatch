@@ -1,3 +1,4 @@
+using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Reencoding;
 
 namespace VideoDispatch.Core.Tests.Reencoding;
@@ -82,10 +83,15 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
     }
 
     [Fact]
-    public void Scales_only_when_the_size_is_known()
+    public void Makes_the_size_it_was_asked_for_with_square_pixels()
     {
-        Assert.Contains("scale=720:1280", FfmpegVideoEncoder.ArgumentsFor("a", "b", Size));
-        Assert.DoesNotContain("-vf", FfmpegVideoEncoder.ArgumentsFor("a", "b", Size with { Width = null, Height = null }));
+        Assert.Contains("scale=720:1280,setsar=1", FfmpegVideoEncoder.ArgumentsFor("a", "b", Size));
+    }
+
+    [Fact]
+    public void A_size_that_could_not_be_read_is_still_made_even()
+    {
+        Assert.Contains("scale=trunc(iw/2)*2:trunc(ih/2)*2", FfmpegVideoEncoder.ArgumentsFor("a", "b", Size with { Width = null, Height = null }));
     }
 
     [Fact]
@@ -101,17 +107,17 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
     }
 
     [Fact]
-    public async Task A_failure_passes_on_what_it_said()
+    public async Task A_failure_passes_on_the_first_thing_it_said_without_who_said_it()
     {
         var script = Script("""
-            echo Some early chatter 1>&2
-            echo in.mov: Invalid data found when processing input 1>&2
+            echo [vost#0:0/libx264 @ 000001C4] [enc:libx264 @ 000001C5] width not divisible by 2 (641x361) 1>&2
+            echo [vf#0:0 @ 000001C6] Task finished with error code: -22 1>&2
             exit /b 1
             """);
 
         var problem = await Assert.ThrowsAsync<EncodeException>(() => new FfmpegVideoEncoder(script).EncodeAsync("in.mov", "out.mp4", Size));
 
-        Assert.Contains("Invalid data", problem.Message);
+        Assert.EndsWith(": width not divisible by 2 (641x361)", problem.Message);
     }
 
     [Fact]
@@ -192,6 +198,38 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
         }
 
         Assert.True((await FfmpegVideoEncoder.InspectAsync(program)).HasH264);
+
+        // An odd size is what H.264 refuses, and a Matroska file's size can't be read here, so nothing would correct it.
+        var source = Path.Combine(_folder, "odd.mkv");
+        var make = new System.Diagnostics.ProcessStartInfo(program) { UseShellExecute = false, CreateNoWindow = true };
+        foreach (var argument in new[] { "-hide_banner", "-v", "error", "-y", "-f", "lavfi", "-i", "color=blue:s=641x361:r=30:d=1", "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv444p", source })
+        {
+            make.ArgumentList.Add(argument);
+        }
+
+        using (var process = System.Diagnostics.Process.Start(make)!)
+        {
+            await process.WaitForExitAsync();
+            Assert.Equal(0, process.ExitCode);
+        }
+
+        var encoder = new FfmpegVideoEncoder(program);
+
+        var unread = Path.Combine(_folder, "unread.mp4");
+        await encoder.EncodeAsync(source, unread, Quality with { Width = null, Height = null });
+
+        // Its pixels stay very slightly out of square to keep the shape, since its real shape isn't known here.
+        Assert.InRange(Mp4MetadataReader.Read(unread)!.DisplayWidth, 639, 641);
+
+        var sized = Path.Combine(_folder, "sized.mp4");
+        await encoder.EncodeAsync(source, sized, Quality with { Width = 640, Height = 360 });
+        Assert.Equal(640, Mp4MetadataReader.Read(sized)!.DisplayWidth);
+        Assert.Equal(360, Mp4MetadataReader.Read(sized)!.DisplayHeight);
+
+        var notVideo = Path.Combine(_folder, "not-a-video.mp4");
+        await File.WriteAllTextAsync(notVideo, "This isn't a video.");
+        var problem = await Assert.ThrowsAsync<EncodeException>(() => encoder.EncodeAsync(notVideo, Path.Combine(_folder, "none.mp4"), Quality));
+        Assert.DoesNotContain("Conversion failed", problem.Message);
     }
 
     private sealed class Reporter(List<double> seen) : IProgress<double>

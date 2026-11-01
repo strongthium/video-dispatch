@@ -173,7 +173,7 @@ The library that reaches these tools, `Microsoft.Windows.SDK.NET.dll`, is 23 MB,
 
 ## FFmpeg downloads
 
-Read on 2026-11-01. The build itself hasn't been fetched yet, so the zip's layout inside is from gyan.dev's page, not from opening one.
+Read on 2026-11-01, and fetched that day through the app's own downloader: 9.0.2 arrived in 8 seconds, matched its checksum, and held exactly one `ffmpeg.exe` (105,423,872 bytes) and its `LICENSE`.
 
 - `https://ffmpeg.org/download.html` says "FFmpeg only provides source code", and links to two builders for Windows: gyan.dev and BtbN.
 - `https://www.gyan.dev/ffmpeg/builds/release-version` answers with the version as plain text, such as `9.0.2`.
@@ -181,6 +181,19 @@ Read on 2026-11-01. The build itself hasn't been fetched yet, so the zip's layou
 - The app asks for `packages/ffmpeg-{version}-essentials_build.zip` by name, so the file and its checksum can't disagree if a new release appears midway. It doesn't parse the web page.
 - The essentials build includes libx264, and the builds are GPLv3, static and 64-bit. The smaller `.7z` would need a package to unpack, so the app uses the zip.
 - BtbN's automatic builds run daily, and its page doesn't mention a checksum file.
+
+## What re-encoding really did
+
+Tried on 2026-11-01 with FFmpeg 9.0.2 and Windows' tools, on made-up test pictures with heavy noise, not camera footage.
+
+- **Fit a size stayed under the limit every time, with both.** A clip that's busy throughout came to 97–99% of the limit. Clips half flat and half busy came to 50–79%, because the flat half doesn't use its share. So it's a ceiling, not a target.
+- **Aiming at quality with FFmpeg can reach twice the estimate.** It stops at twice the planned bitrate, and heavy noise goes all the way there: 39.7 MB against about 19 MB for Balanced at 1080p60. Windows' tools aim at the bitrate, and landed on it.
+- **Sideways videos stay upright with both,** turned either way.
+- **H.264 refuses an odd size,** such as 641×361. The app asks FFmpeg for an even one, even when it couldn't read the size itself. Scaling to a nearby size leaves pixels slightly out of square unless told otherwise, and players then report 639 wide.
+- **Windows' tools refuse an odd-sized source** at the start, giving no reason beyond "Unknown". The same picture at an even size works. The message suggests FFmpeg or sending the file as it is.
+- **FFmpeg's last line is just "Conversion failed!"** With `-v error`, the first line says why.
+- **Windows' MP4s keep their index at the end,** and FFmpeg's at the front, as asked. It makes no difference to an upload.
+- **Odd file names are fine.** Accents, Japanese, `%`, `#`, `&` and brackets all went through, because arguments go straight to the program.
 
 ## Sources
 

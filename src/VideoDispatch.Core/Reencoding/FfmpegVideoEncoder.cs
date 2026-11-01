@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text.RegularExpressions;
 
 namespace VideoDispatch.Core.Reencoding;
 
@@ -13,7 +14,7 @@ public sealed record FfmpegInfo(string Version, bool HasH264);
 /// Uses an <c>ffmpeg.exe</c> the user chose, or asked this app to download. None ships with the app, and nothing needs
 /// it: it's only for those who want what it adds. Arguments go straight to the program, with no shell to read them.
 /// </summary>
-public sealed class FfmpegVideoEncoder(string program) : IVideoEncoder
+public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
 {
     private const int MaxMessageLength = 300;
 
@@ -33,7 +34,8 @@ public sealed class FfmpegVideoEncoder(string program) : IVideoEncoder
 
     public static IReadOnlyList<string> ArgumentsFor(string input, string output, EncodePlan plan)
     {
-        var arguments = new List<string> { "-hide_banner", "-nostdin", "-y", "-i", input, "-map_metadata", "-1", "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p" };
+        // Errors only, because the first one says why, and what FFmpeg says last is just "Conversion failed!".
+        var arguments = new List<string> { "-hide_banner", "-v", "error", "-nostdin", "-y", "-i", input, "-map_metadata", "-1", "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p" };
 
         if (plan.ConstantQuality is { } quality)
         {
@@ -45,11 +47,11 @@ public sealed class FfmpegVideoEncoder(string program) : IVideoEncoder
             arguments.AddRange(["-b:v", Bits(plan.VideoBitrate), "-maxrate", Bits(plan.VideoBitrate * 3 / 2), "-bufsize", Bits(plan.VideoBitrate * 3)]);
         }
 
-        // FFmpeg applies a phone's rotation first, so this is the size viewers see.
-        if (plan is { Width: { } width, Height: { } height })
-        {
-            arguments.AddRange(["-vf", string.Create(CultureInfo.InvariantCulture, $"scale={width}:{height}")]);
-        }
+        // FFmpeg applies a phone's rotation first, so this is the size viewers see. It's the shape as shown, so the pixels
+        // are square. H.264 refuses an odd size, so one that couldn't be read is still made even.
+        arguments.AddRange(["-vf", plan is { Width: { } width, Height: { } height }
+            ? string.Create(CultureInfo.InvariantCulture, $"scale={width}:{height},setsar=1")
+            : "scale=trunc(iw/2)*2:trunc(ih/2)*2"]);
 
         arguments.AddRange(["-c:a", "aac", "-b:a", Bits(plan.AudioBitrate), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", output]);
         return arguments;
@@ -80,16 +82,18 @@ public sealed class FfmpegVideoEncoder(string program) : IVideoEncoder
             var text = await errors;
             throw new EncodeException(text.Contains("libx264", StringComparison.Ordinal) && text.Contains("Unknown encoder", StringComparison.OrdinalIgnoreCase)
                 ? "This FFmpeg has no H.264 encoder (libx264). Choose a build that has one under Settings."
-                : $"FFmpeg couldn't re-encode this video: {LastLineOf(text)}");
+                : $"FFmpeg couldn't re-encode this video: {FirstErrorIn(text)}");
         }
     }
 
     private static string Bits(long bitsPerSecond) => bitsPerSecond.ToString(CultureInfo.InvariantCulture);
 
-    private static string LastLineOf(string text)
+    /// <summary>The first line, without the <c>[libx264 @ 000001A2]</c> that says which part of FFmpeg is talking.</summary>
+    private static string FirstErrorIn(string text)
     {
-        var last = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).LastOrDefault() ?? "it gave no reason.";
-        return last.Length > MaxMessageLength ? last[..MaxMessageLength] : last;
+        var first = text.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault() ?? "it gave no reason.";
+        first = SpeakerPattern().Replace(first, "");
+        return first.Length > MaxMessageLength ? first[..MaxMessageLength] : first;
     }
 
     private static Process Start(string program, IEnumerable<string> arguments)
@@ -140,4 +144,7 @@ public sealed class FfmpegVideoEncoder(string program) : IVideoEncoder
         {
         }
     }
+
+    [GeneratedRegex(@"\A(\[[^\]]* @ [^\]]*\]\s*)+")]
+    private static partial Regex SpeakerPattern();
 }
