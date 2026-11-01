@@ -11,9 +11,14 @@ public sealed record TemplateResult(string Text, IReadOnlyList<string> UnknownVa
 /// </summary>
 public static class TemplateRenderer
 {
-    public static TemplateResult Render(string template, TemplateContext context)
+    public static TemplateResult Render(string template, TemplateContext context) => Render(template, context.ToVariables());
+
+    /// <summary>The variables written in a text, known or not. Text about to be posted shouldn't have any left.</summary>
+    public static IReadOnlyList<string> FindVariables(string text) =>
+        Render(text, new Dictionary<string, string>()).UnknownVariables;
+
+    private static TemplateResult Render(string template, Dictionary<string, string> values)
     {
-        var values = context.ToVariables();
         var text = new StringBuilder(template.Length);
         var unknown = new List<string>();
 

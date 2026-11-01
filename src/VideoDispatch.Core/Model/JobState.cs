@@ -4,7 +4,7 @@ public enum JobState
 {
     Queued,
 
-    /// <summary>Reserved for the later render step. Nothing enters this state yet.</summary>
+    /// <summary>The render step is running. For now it does nothing, so this passes at once.</summary>
     Rendering,
 
     Uploading,

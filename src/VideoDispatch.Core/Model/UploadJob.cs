@@ -38,8 +38,13 @@ public sealed record UploadJob
     /// <summary>The TikTok publish ID or YouTube video ID once the platform has assigned one.</summary>
     public string? RemoteId { get; init; }
 
+    /// <summary>When the platform got the whole file.</summary>
+    public DateTimeOffset? UploadedAt { get; init; }
+
     /// <summary>The video is in the playlist it was meant for. This step never uploads the video again.</summary>
     public bool PlaylistAdded { get; init; }
+
+    public int PlaylistAttempts { get; init; }
 
     /// <summary>Why the video couldn't be added to its playlist, after giving up. The video itself is fine.</summary>
     public string? PlaylistError { get; init; }
