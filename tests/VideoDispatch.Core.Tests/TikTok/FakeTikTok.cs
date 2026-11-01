@@ -110,7 +110,7 @@ internal sealed class FakeTikTok : HttpMessageHandler
     }
 }
 
-internal sealed class FakeTokens : IAccessTokenSource
+internal sealed class FakeTokens(Platform expected = Platform.TikTok) : IAccessTokenSource
 {
     private int _issued;
 
@@ -119,7 +119,7 @@ internal sealed class FakeTokens : IAccessTokenSource
 
     public Task<string> GetAccessTokenAsync(Platform platform, CancellationToken cancellationToken = default)
     {
-        Assert.Equal(Platform.TikTok, platform);
+        Assert.Equal(expected, platform);
         return Throw is not null ? Task.FromException<string>(Throw) : Task.FromResult($"token-{_issued + 1}");
     }
 

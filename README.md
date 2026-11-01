@@ -6,7 +6,7 @@
 
 A Windows desktop app for publishing video to TikTok and YouTube, including Shorts. It runs with no server: each user registers their own TikTok and Google apps, and tokens stay in Windows Credential Manager.
 
-**Status: early development.** The core library has job and preset models, template rendering, an MP4/MOV metadata reader, account sign-in, secure token storage and a TikTok upload client. The app so far is one Accounts screen, where you enter your own app's keys and connect, so it can't upload anything from the window yet. The sign-in and the upload client have only been run against made-up platforms, not real TikTok or Google accounts.
+**Status: early development.** The core library has job and preset models, template rendering, an MP4/MOV metadata reader, account sign-in, secure token storage and upload clients for TikTok and YouTube. The app so far is one Accounts screen, where you enter your own app's keys and connect, so it can't upload anything from the window yet. The sign-in and the upload clients have only been run against made-up platforms, not real TikTok or Google accounts.
 
 ## Secure storage
 

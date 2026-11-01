@@ -25,7 +25,12 @@ public interface IVideoUploader
 }
 
 /// <param name="RemoteId">The platform's ID for the upload, used to check on it later.</param>
-public sealed record UploadReceipt(string RemoteId);
+/// <param name="Warning">Something the user should know about a video that did arrive.</param>
+public sealed record UploadReceipt(string RemoteId, string? Warning = null);
+
+/// <param name="Blocks">True when the platform would refuse the video. False when it might be fine but can't be checked.</param>
+/// <param name="Message">What to tell the user.</param>
+public sealed record VideoLimitFinding(bool Blocks, string Message);
 
 public enum UploadFailureKind
 {

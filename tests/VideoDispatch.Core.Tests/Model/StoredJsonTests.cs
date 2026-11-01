@@ -42,7 +42,8 @@ public class StoredJsonTests
             Attempts = 3,
             BytesSent = 1024,
             TotalBytes = 2048,
-            UploadSessionUrl = "https://example.test/session",
+            Warning = "Stayed private",
+            PlaylistAdded = true,
         };
 
         var restored = RoundTrip(job);

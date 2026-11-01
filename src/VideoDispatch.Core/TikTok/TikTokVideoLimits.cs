@@ -1,10 +1,7 @@
 using VideoDispatch.Core.Media;
+using VideoDispatch.Core.Uploads;
 
 namespace VideoDispatch.Core.TikTok;
-
-/// <param name="Blocks">True when TikTok would refuse the video. False when it might be fine but can't be checked.</param>
-/// <param name="Message">What to tell the user.</param>
-public sealed record VideoLimitFinding(bool Blocks, string Message);
 
 /// <summary>TikTok's limits on a video. What can't be read from the file is a warning, because TikTok may still accept it.</summary>
 public static class TikTokVideoLimits

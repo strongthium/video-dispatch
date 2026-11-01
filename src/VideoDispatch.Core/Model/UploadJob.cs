@@ -29,18 +29,29 @@ public sealed record UploadJob
     public DateTimeOffset? NextAttemptAt { get; init; }
     public string? LastError { get; init; }
 
+    /// <summary>Something the user should know about a video that did arrive.</summary>
+    public string? Warning { get; init; }
+
     public long BytesSent { get; init; }
     public long TotalBytes { get; init; }
 
-    /// <summary>The TikTok upload URL or YouTube session URI, kept so an upload can resume.</summary>
-    public string? UploadSessionUrl { get; init; }
-
     /// <summary>The TikTok publish ID or YouTube video ID once the platform has assigned one.</summary>
     public string? RemoteId { get; init; }
+
+    /// <summary>The video is in the playlist it was meant for. This step never uploads the video again.</summary>
+    public bool PlaylistAdded { get; init; }
+
+    /// <summary>Why the video couldn't be added to its playlist, after giving up. The video itself is fine.</summary>
+    public string? PlaylistError { get; init; }
 
     [JsonIgnore]
     public Platform Platform => Details.Platform;
 
     [JsonIgnore]
     public string PublishPath => RenderedPath ?? SourcePath;
+
+    /// <summary>The video still has to go in a playlist.</summary>
+    [JsonIgnore]
+    public bool NeedsPlaylistStep =>
+        Details is YouTubePostDetails { PlaylistId: not null } && RemoteId is not null && !PlaylistAdded && PlaylistError is null;
 }

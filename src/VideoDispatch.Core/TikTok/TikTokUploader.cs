@@ -70,8 +70,7 @@ public sealed class TikTokUploader : IVideoUploader
         var contentType = TikTokVideoLimits.ContentTypeFor(job.PublishPath)
             ?? throw Failure(UploadFailureKind.Permanent, "TikTok takes MP4, MOV and WebM files.");
 
-        // Others can read the file while it's open, but not change it, so what was checked is what gets sent.
-        using var file = OpenUnchanged(job);
+        using var file = SourceFile.OpenUnchanged(job);
         var size = RandomAccess.GetLength(file);
         if (!TikTokChunkPlan.CanUpload(size))
         {
@@ -144,38 +143,6 @@ public sealed class TikTokUploader : IVideoUploader
 
     private UploadException Failure(UploadFailureKind kind, string message, DateTimeOffset? retryAt = null) =>
         new(Platform, kind, message, retryAt);
-
-    private SafeFileHandle OpenUnchanged(UploadJob job)
-    {
-        SafeFileHandle file;
-        try
-        {
-            file = File.OpenHandle(job.PublishPath, FileMode.Open, FileAccess.Read, FileShare.Read, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        }
-        catch (Exception exception) when (exception is FileNotFoundException or DirectoryNotFoundException)
-        {
-            throw Failure(UploadFailureKind.Permanent, "The video file is gone.");
-        }
-        catch (UnauthorizedAccessException)
-        {
-            throw Failure(UploadFailureKind.Permanent, "Windows won't allow reading the video file.");
-        }
-        catch (IOException)
-        {
-            throw Failure(UploadFailureKind.Retryable, "The video file is in use by another program.");
-        }
-
-        // A rendered file is this app's own output, made after queueing.
-        if (job.RenderedPath is null &&
-            (RandomAccess.GetLength(file) != job.SourceLength ||
-             File.GetLastWriteTimeUtc(job.SourcePath) != job.SourceLastWriteUtc.UtcDateTime))
-        {
-            file.Dispose();
-            throw Failure(UploadFailureKind.Permanent, "The video file has changed since it was queued. Queue it again to post the new version.");
-        }
-
-        return file;
-    }
 
     private async Task<(string PublishId, Uri UploadUrl)> InitAsync(TikTokChunkPlan plan, CancellationToken cancellationToken)
     {

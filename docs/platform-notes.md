@@ -1,6 +1,6 @@
 # Platform notes
 
-What the code relies on from each platform's official docs, last read on 2026-10-31, and the TikTok upload pages on 2026-11-01. These rules change, so recheck the source before relying on a detail.
+What the code relies on from each platform's official docs, last read on 2026-10-31, and the TikTok and YouTube upload pages on 2026-11-01. These rules change, so recheck the source before relying on a detail.
 
 ## TikTok
 
@@ -67,6 +67,19 @@ Fetch creator info, show the nickname, check `max_video_post_duration_sec`, offe
 - `videos.insert` has its own quota bucket of 100 calls per day. Other methods share 10,000 units per day, with `playlistItems.insert` at 50 and `playlists.list`, `videoCategories.list` and `channels.list` at 1 each. Quotas reset at midnight Pacific.
 - Maximum file size is 256 GB. Media types are `video/*` and `application/octet-stream`.
 - An omitted `privacyStatus` defaults to `public`, so it is always sent.
+- The docs don't say whether starting a session or finishing one is what counts against the 100 calls. The app keeps its session so it doesn't start another needlessly.
+- The `videos.insert` page doesn't list `snippet.categoryId` as required, but the errors page says `invalidVideoMetadata` occurs when the title and category aren't both set. So the app sends category 22 (People & Blogs) when none is chosen.
+
+### Errors
+
+Reasons are at `error.errors[].reason`.
+
+- `403 quotaExceeded` and `403 dailyLimitExceeded`: wait until midnight Pacific.
+- `400 uploadLimitExceeded`: the channel's own daily limit, separate from API quota. The docs give no reset time, so the app waits 24 hours.
+- `403 rateLimitExceeded`, `403 userRateLimitExceeded` and `429 rateLimitExceeded`: try again shortly.
+- `403 insufficientPermissions`: connect the account again.
+- `401 authError` and `401 expired`: replace the token once, then connect again.
+- Other 4xx are final.
 
 ### Field limits
 
@@ -81,10 +94,26 @@ The sources conflict. The `videos.insert` page says "Videos uploaded from unveri
 
 ### Resumable upload
 
-- Start: `POST https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=...` with `X-Upload-Content-Length` and `X-Upload-Content-Type`. The session URI comes back in `Location`.
+- Start: `POST https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=...` with `X-Upload-Content-Length` and `X-Upload-Content-Type`. It answers 200, and the session URI comes back in `Location`.
+- The docs' samples send `Authorization` on every chunk and status check, so the app does too, and only ever to an https address under `googleapis.com`.
 - Chunks are multiples of 256 KB, all the same size except the last.
-- Status check: empty `PUT` with `Content-Range: bytes */TOTAL`. A 308 with `Range` gives the bytes received, and no `Range` means none. Honor `Retry-After`.
-- Retry with backoff after no response, 500, 502, 503 or 504. Other codes are permanent. A 404 means the session expired and the upload starts again.
+- A 308 is YouTube's "keep going", not a redirect, so the upload client must not follow redirects.
+- Status check: empty `PUT` with `Content-Range: bytes */TOTAL`. A 308 with `Range: bytes=0-N` gives the bytes received, and no `Range` means none. Honor `Retry-After`. A finished upload gives the same answer it gave when it finished, so a lost final answer doesn't need a second upload.
+- Overlapping or skipping bytes means none of that request is taken, so the next chunk always starts from what `Range` says.
+- Only 201 with the video resource means done. The app also accepts 200, which other Google upload docs use.
+- Retry with backoff after no response, 500, 502, 503 or 504. Other codes are permanent. A 404 means the session expired and the upload starts again. The docs give no session lifetime.
+
+### Processing
+
+- `videos.list` with `part=status`, 1 unit per call.
+- `status.uploadStatus` is `uploaded`, `processed`, `failed`, `rejected` or `deleted`, with `failureReason` and `rejectionReason` giving more.
+- `failureReason` `uploadAborted` is treated as worth uploading again. The others would fail the same way.
+
+### Playlists and categories
+
+- `playlistItems.insert` needs `youtube.force-ssl` and costs 50 units. A `videoNotFound` just after uploading is treated as "not visible yet". `videoAlreadyInPlaylist` counts as done, so the step is safe to repeat.
+- `playlists.list` with `mine=true` takes up to 50 per page.
+- `videoCategories.list` needs `regionCode`. Only categories with `snippet.assignable` can be given to a video.
 
 ### Shorts
 
@@ -128,6 +157,12 @@ The app always requests `youtube.upload` and `youtube.readonly`. Adding to a pla
 - [YouTube videos.insert](https://developers.google.com/youtube/v3/docs/videos/insert)
 - [YouTube videos resource](https://developers.google.com/youtube/v3/docs/videos)
 - [YouTube resumable uploads](https://developers.google.com/youtube/v3/guides/using_resumable_upload_protocol)
+- [YouTube errors](https://developers.google.com/youtube/v3/docs/errors)
+- [YouTube global errors](https://developers.google.com/youtube/v3/docs/core_errors)
+- [YouTube playlistItems.insert](https://developers.google.com/youtube/v3/docs/playlistItems/insert)
+- [YouTube playlists.list](https://developers.google.com/youtube/v3/docs/playlists/list)
+- [YouTube videoCategories.list](https://developers.google.com/youtube/v3/docs/videoCategories/list)
+- [YouTube videos.list](https://developers.google.com/youtube/v3/docs/videos/list)
 - [YouTube quota costs](https://developers.google.com/youtube/v3/determine_quota_cost)
 - [YouTube API revision history](https://developers.google.com/youtube/v3/revision_history)
 - [YouTube Shorts help](https://support.google.com/youtube/answer/15424877)
