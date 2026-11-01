@@ -14,6 +14,7 @@ public sealed partial class MainWindow : Window
     private readonly YouTubeChoices _choices;
     private readonly IReadOnlyList<AccountPanel> _accounts;
     private readonly SettingsPanel _settings;
+    private readonly CancellationTokenSource _stopChecks = new();
     private readonly Dictionary<string, UserControl> _pages = [];
 
     /// <param name="services">What the screens work with.</param>
@@ -41,11 +42,28 @@ public sealed partial class MainWindow : Window
 
         _queue = new QueuePanel(services.Queue, action => Dispatcher.BeginInvoke(action));
         _queue.ReportDamaged(damagedJobs);
-        _settings = new SettingsPanel(services.Settings, services.InspectFfmpeg);
+        _settings = new SettingsPanel(services.Settings, services.Ffmpeg, services.InspectFfmpeg, action => Dispatcher.BeginInvoke(action));
+        _settings.PropertyChanged += (_, _) => SettingsBadge.Visibility = _settings.HasUpdate ? Visibility.Visible : Visibility.Collapsed;
+        Closed += (_, _) => _stopChecks.Cancel();
 
         Loaded += async (_, _) =>
         {
             await _settings.LoadAsync();
+
+            // A downloaded FFmpeg is the only reason to ask anything, and this doesn't ask without one.
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    services.Ffmpeg.Tidy();
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                }
+
+                await services.Ffmpeg.RunChecksAsync(_stopChecks.Token);
+            });
+
             await services.Presets.LoadAsync();
             await Task.WhenAll(_accounts.Select(account => account.LoadAsync()));
             await _newPost.RefreshAsync();

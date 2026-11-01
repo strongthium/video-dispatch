@@ -1,4 +1,5 @@
 using System.Net.Http;
+using VideoDispatch.Core;
 using VideoDispatch.Core.Accounts;
 using VideoDispatch.Core.Accounts.Secrets;
 using VideoDispatch.Core.Media;
@@ -22,6 +23,7 @@ public sealed record Services(
     IYouTubeApi YouTube,
     Func<string, VideoMetadata?> ReadMetadata,
     AppSettingsStore Settings,
+    FfmpegManager Ffmpeg,
     Func<string, CancellationToken, Task<FfmpegInfo>> InspectFfmpeg)
 {
     public static Services CreateReal() =>
@@ -70,6 +72,10 @@ public sealed record Services(
             new JsonFolderStore<TikTokPreset>(folders.TikTokPresets),
             new JsonFolderStore<YouTubePreset>(folders.YouTubePresets));
 
-        return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read, settings, FfmpegVideoEncoder.InspectAsync);
+        var downloads = new HttpClient(network(new SocketsHttpHandler())) { Timeout = Timeout.InfiniteTimeSpan };
+        downloads.DefaultRequestHeaders.UserAgent.ParseAdd($"video-dispatch/{Updater.RunningVersion.ToString(3)}");
+        var ffmpeg = new FfmpegManager(settings, new FfmpegDownloader(downloads, folders.Ffmpeg), time);
+
+        return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read, settings, ffmpeg, FfmpegVideoEncoder.InspectAsync);
     }
 }

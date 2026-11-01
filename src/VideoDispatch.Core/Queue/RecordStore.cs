@@ -134,4 +134,7 @@ public sealed record AppFolders(string Root)
     public string Rendered => Path.Combine(Root, "rendered");
 
     public string Settings => Path.Combine(Root, "settings.json");
+
+    /// <summary>FFmpeg, if the user asked this app to download it.</summary>
+    public string Ffmpeg => Path.Combine(Root, "ffmpeg");
 }

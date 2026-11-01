@@ -171,6 +171,17 @@ The app always requests `youtube.upload` and `youtube.readonly`. Adding to a pla
 
 The library that reaches these tools, `Microsoft.Windows.SDK.NET.dll`, is 23 MB, and a framework-dependent single file can't be compressed. Listing only the needed types for `CsWinRT` to generate kept pulling in more of Windows. So the published program holds it zipped, at 6 MB, and loads it from memory on first use.
 
+## FFmpeg downloads
+
+Read on 2026-11-01. The build itself hasn't been fetched yet, so the zip's layout inside is from gyan.dev's page, not from opening one.
+
+- `https://ffmpeg.org/download.html` says "FFmpeg only provides source code", and links to two builders for Windows: gyan.dev and BtbN.
+- `https://www.gyan.dev/ffmpeg/builds/release-version` answers with the version as plain text, such as `9.0.2`.
+- `https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip` answers 303 to `packages/ffmpeg-9.0.2-essentials_build.zip`, which is 114,768,076 bytes, with `Accept-Ranges: bytes`. Adding `.sha256` gives the checksum as bare hex.
+- The app asks for `packages/ffmpeg-{version}-essentials_build.zip` by name, so the file and its checksum can't disagree if a new release appears midway. It doesn't parse the web page.
+- The essentials build includes libx264, and the builds are GPLv3, static and 64-bit. The smaller `.7z` would need a package to unpack, so the app uses the zip.
+- BtbN's automatic builds run daily, and its page doesn't mention a checksum file.
+
 ## Sources
 
 - [TikTok inbox upload](https://developers.tiktok.com/doc/content-posting-api-reference-upload-video)
@@ -202,3 +213,6 @@ The library that reaches these tools, `Microsoft.Windows.SDK.NET.dll`, is 23 MB,
 - [Google audience and publishing status](https://support.google.com/cloud/answer/15549945)
 - [Google OAuth app verification](https://support.google.com/cloud/answer/13463073)
 - [Google: when verification isn't needed](https://support.google.com/cloud/answer/13464323)
+- [FFmpeg's download page](https://ffmpeg.org/download.html)
+- [gyan.dev FFmpeg builds](https://www.gyan.dev/ffmpeg/builds/)
+- [BtbN FFmpeg builds](https://github.com/BtbN/FFmpeg-Builds)

@@ -10,8 +10,8 @@ namespace VideoDispatch.Core.Reencoding;
 public sealed record FfmpegInfo(string Version, bool HasH264);
 
 /// <summary>
-/// Uses an <c>ffmpeg.exe</c> the user chose. This app never ships or fetches one, and nothing needs it: it's only for
-/// those who want what it adds. Arguments go straight to the program, with no shell to read them.
+/// Uses an <c>ffmpeg.exe</c> the user chose, or asked this app to download. None ships with the app, and nothing needs
+/// it: it's only for those who want what it adds. Arguments go straight to the program, with no shell to read them.
 /// </summary>
 public sealed class FfmpegVideoEncoder(string program) : IVideoEncoder
 {

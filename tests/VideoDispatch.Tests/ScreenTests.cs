@@ -12,9 +12,184 @@ namespace VideoDispatch.Tests;
 public sealed class SettingsPanelTests
 {
     private readonly AppSettingsStore _store = new(null);
+    private readonly StubDownloads _downloads = new();
+    private readonly FfmpegManager _manager;
     private Func<string, FfmpegInfo> _inspect = _ => new FfmpegInfo("ffmpeg version 9.9", true);
 
-    private SettingsPanel Panel() => new(_store, (path, _) => Task.FromResult(_inspect(path)));
+    public SettingsPanelTests() => _manager = new FfmpegManager(_store, _downloads, TimeProvider.System);
+
+    private SettingsPanel Panel() => new(_store, _manager, (path, _) => Task.FromResult(_inspect(path)), action => action());
+
+    [Fact]
+    public async Task Downloading_starts_using_it_and_says_which_version()
+    {
+        var panel = Panel();
+        await panel.LoadAsync();
+        Assert.True(panel.CanDownload);
+
+        await panel.DownloadAsync();
+
+        Assert.True(panel.IsUsingFfmpeg);
+        Assert.True(panel.UsesDownloadedCopy);
+        Assert.Equal("Using FFmpeg 9.0.2.", panel.Message);
+        Assert.Contains("FFmpeg 9.0.2, downloaded by this app", panel.EngineText);
+        Assert.False(panel.IsDownloading);
+        Assert.False(panel.CanDownload);
+        Assert.Equal("", panel.FfmpegPath);
+    }
+
+    [Fact]
+    public async Task Shows_how_far_a_download_has_got()
+    {
+        var reached = new TaskCompletionSource();
+        var carryOn = new TaskCompletionSource();
+        _downloads.Work = async progress =>
+        {
+            progress?.Report(new FfmpegDownloadProgress(55 * 1024 * 1024, 110 * 1024 * 1024));
+            await Task.Delay(100);
+            reached.TrySetResult();
+            await carryOn.Task;
+        };
+        var panel = Panel();
+
+        var running = panel.DownloadAsync();
+        await reached.Task;
+        await Task.Delay(100);
+
+        Assert.True(panel.IsDownloading);
+        Assert.False(panel.CanDownload);
+        Assert.False(panel.CanStopUsing);
+
+        carryOn.SetResult();
+        await running;
+        Assert.False(panel.IsDownloading);
+    }
+
+    [Fact]
+    public async Task A_download_can_be_cancelled_and_changes_nothing()
+    {
+        var started = new TaskCompletionSource();
+        var panel = Panel();
+        _downloads.Work = async _ =>
+        {
+            started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, _downloads.Token);
+        };
+
+        var running = panel.DownloadAsync();
+        await started.Task;
+        panel.CancelDownload();
+        await running;
+
+        Assert.Equal("Download cancelled.", panel.Message);
+        Assert.False(panel.MessageIsError);
+        Assert.False(panel.IsUsingFfmpeg);
+        Assert.Null(_store.Current.FfmpegPath);
+        Assert.True(panel.CanDownload);
+    }
+
+    [Fact]
+    public async Task A_failed_download_says_why_and_stays_on_what_was_in_use()
+    {
+        _downloads.Fails = new EncodeException("Couldn't reach gyan.dev.");
+        var panel = Panel();
+
+        await panel.DownloadAsync();
+
+        Assert.Equal("Couldn't reach gyan.dev.", panel.Message);
+        Assert.True(panel.MessageIsError);
+        Assert.False(panel.IsUsingFfmpeg);
+        Assert.Contains("Windows' own tools", panel.EngineText);
+    }
+
+    [Fact]
+    public async Task An_update_is_offered_and_taken()
+    {
+        var panel = Panel();
+        await panel.DownloadAsync();
+        Assert.False(panel.HasUpdate);
+
+        _store.Save(_store.Current with { FfmpegLatest = "9.1" });
+        Assert.True(panel.HasUpdate);
+        Assert.Equal("FFmpeg 9.1 is available. You have 9.0.2.", panel.UpdateText);
+        Assert.True(panel.CanUpdate);
+
+        _downloads.Latest = "9.1";
+        await panel.DownloadAsync();
+
+        Assert.False(panel.HasUpdate);
+        Assert.Contains("FFmpeg 9.1, downloaded", panel.EngineText);
+    }
+
+    [Fact]
+    public async Task Choosing_your_own_copy_replaces_a_downloaded_one()
+    {
+        var panel = Panel();
+        await panel.DownloadAsync();
+        panel.FfmpegPath = @"C:\Tools\ffmpeg.exe";
+
+        await panel.UseAsync();
+
+        Assert.False(panel.UsesDownloadedCopy);
+        Assert.Equal(@"C:\Tools\ffmpeg.exe", _store.Current.FfmpegPath);
+        Assert.Contains("your own copy", panel.EngineText);
+        Assert.True(panel.CanDownload);
+    }
+
+    [Fact]
+    public async Task Going_back_to_Windows_tools_removes_a_downloaded_copy()
+    {
+        var panel = Panel();
+        await panel.DownloadAsync();
+
+        await panel.StopUsingAsync();
+
+        Assert.False(panel.IsUsingFfmpeg);
+        Assert.True(_downloads.RemovedAll);
+        Assert.True(panel.CanDownload);
+    }
+
+    [Fact]
+    public async Task A_downloaded_copy_shows_at_the_next_start_without_filling_the_path_box()
+    {
+        await new FfmpegManager(_store, _downloads, TimeProvider.System).InstallLatestAsync();
+        var panel = Panel();
+
+        await panel.LoadAsync();
+
+        Assert.True(panel.IsUsingFfmpeg);
+        Assert.True(panel.UsesDownloadedCopy);
+        Assert.Equal("", panel.FfmpegPath);
+    }
+
+    private sealed class StubDownloads : IFfmpegDownloads
+    {
+        public string Latest { get; set; } = "9.0.2";
+
+        public Exception? Fails { get; set; }
+
+        public Func<IProgress<FfmpegDownloadProgress>?, Task>? Work { get; set; }
+
+        public CancellationToken Token { get; private set; }
+
+        public bool RemovedAll { get; private set; }
+
+        public Task<string> GetLatestVersionAsync(CancellationToken cancellationToken = default) =>
+            Fails is not null ? Task.FromException<string>(Fails) : Task.FromResult(Latest);
+
+        public async Task<string> InstallAsync(string version, IProgress<FfmpegDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
+        {
+            Token = cancellationToken;
+            if (Work is not null)
+            {
+                await Work(progress);
+            }
+
+            return $@"C:\App\ffmpeg\{version}\ffmpeg.exe";
+        }
+
+        public void RemoveAllExcept(string? path) => RemovedAll = path is null;
+    }
 
     [Fact]
     public async Task Starts_on_Windows_tools_with_nothing_to_do()

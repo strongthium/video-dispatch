@@ -48,7 +48,16 @@ Your original is never changed. The new file stays in the app's own folder until
 
 ![Settings](docs/settings.png)
 
-Windows' own tools do this, so there's nothing to install. If you'd rather use [FFmpeg](https://ffmpeg.org/download.html), point the app at your own `ffmpeg.exe` under **Settings**: it reads more formats, and aims at a quality rather than a bitrate. The app doesn't include it or download it, and nothing needs it.
+Windows' own tools do this, so there's nothing to install, and nothing needs FFmpeg. If you'd rather use it, because it reads more formats and aims at a quality rather than a bitrate, **Settings** offers two ways:
+
+| | |
+|---|---|
+| **Download FFmpeg** | fetches the stable Windows build, about 115 MB, checks it against its published checksum, unpacks only `ffmpeg.exe` and its licence into the app's folder, and checks that it runs and can make H.264 |
+| **Use your own copy** | point at any `ffmpeg.exe` you already have |
+
+FFmpeg isn't part of this project, and never ships with it: it arrives only when you press the button. [FFmpeg's own site](https://ffmpeg.org/download.html) offers only source code, and points Windows users to outside builders, so the button fetches the release build from [gyan.dev](https://www.gyan.dev/ffmpeg/builds/), one of the two it links to, under GPLv3. The checksum comes from that same site, so it catches a damaged download, not a tampered site.
+
+While a downloaded copy is in use, the app asks gyan.dev for the newest version number about once a day. If there's a newer one, a dot appears beside **Settings**, and **Update FFmpeg** fetches it when you press it. It never installs one by itself. It doesn't ask anything if you use your own copy or Windows' tools. Going back to Windows' tools, or choosing your own copy, removes the downloaded one.
 
 ### Queue
 
@@ -147,12 +156,12 @@ A Google project gets 100 video uploads a day through YouTube's API, and its quo
 
 ## What hasn't been tried
 
-Everything has been tested against made-up platforms: 746 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
+Everything has been tested against made-up platforms: 798 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
 
 - A real sign-in or upload on TikTok or YouTube, or an app approval from TikTok.
 - A real video from a phone, rotated, through **New post**. Reading video details has been tried on real files, but rotation only on hand-built ones.
 - Re-encoding real footage. Windows' tools have really encoded test videos, sideways ones included, but those are flat colours. So how it looks, how close **Fit a size** comes, and how long a long video takes are all still to be seen.
-- A real FFmpeg. The app has only run a stand-in that answers the way FFmpeg's docs say.
+- A real FFmpeg, or a real download of one. The app has only run a stand-in that answers the way FFmpeg's docs say, and fetched from a made-up site shaped like gyan.dev's real answers.
 - An edition of Windows without the media tools, such as N editions. Re-encoding there should say to install the Media Feature Pack or choose FFmpeg.
 - An update from a real release, because there's no release yet. The check for one has run against GitHub, and the update itself against made-up downloads.
 
@@ -166,12 +175,13 @@ GitHub is asked only when About is first shown, again if it's shown an hour late
 
 ## Your data
 
-There's no server and no telemetry. Your videos and what you write go from your PC to TikTok and Google, under your own apps, and nowhere else.
+There's no server and no telemetry. Your videos and what you write go from your PC to TikTok and Google, under your own apps, and nowhere else. If you download FFmpeg, gyan.dev sees your address and this program's name and version, when you fetch it and at each check for a newer version. Nothing about your videos goes there.
 
 | | |
 |---|---|
 | **Keys, sign-ins and the addresses of unfinished uploads** | only in Windows Credential Manager, never in a plain file. Access tokens stay in memory |
 | **Jobs, presets and settings** | JSON files under `%LOCALAPPDATA%\video-dispatch`, with no secrets in them |
+| **A downloaded FFmpeg** | under that same folder, if you asked for it |
 | **Your videos** | read where they are, and never changed. A re-encoded copy stays under that folder until the platforms have it |
 
 To remove it all, press **Disconnect** and **Remove keys** under **Accounts**, delete that folder, and delete the program.

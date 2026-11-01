@@ -25,6 +25,10 @@ public sealed partial class SettingsPage : UserControl
         }
     }
 
+    private async void Download_Click(object sender, RoutedEventArgs e) => await Panel.DownloadAsync();
+
+    private void CancelDownload_Click(object sender, RoutedEventArgs e) => Panel.CancelDownload();
+
     private async void Use_Click(object sender, RoutedEventArgs e) => await Panel.UseAsync();
 
     private async void StopUsing_Click(object sender, RoutedEventArgs e) => await Panel.StopUsingAsync();

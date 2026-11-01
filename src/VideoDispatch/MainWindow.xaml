@@ -48,6 +48,9 @@
           <StackPanel Orientation="Horizontal">
             <TextBlock Text="&#xE713;" Style="{StaticResource Icon}" FontSize="18" />
             <TextBlock Text="Settings" Margin="13,0,0,0" />
+            <!-- An update for a downloaded FFmpeg is waiting. -->
+            <Ellipse x:Name="SettingsBadge" Width="8" Height="8" Margin="8,0,0,0" VerticalAlignment="Center" Visibility="Collapsed"
+                     Fill="{DynamicResource AccentFillColorDefaultBrush}" ToolTip="An update for FFmpeg is available" />
           </StackPanel>
         </RadioButton>
       </StackPanel>

@@ -70,6 +70,7 @@ public static class SampleServices
                 },
             ]));
 
+        var settings = new AppSettingsStore(null);
         return new Services(
             accounts,
             platforms.ApproveAsync,
@@ -77,7 +78,8 @@ public static class SampleServices
             presets,
             youTube,
             _ => SampleVideo,
-            new AppSettingsStore(null),
+            settings,
+            new FfmpegManager(settings, new SampleFfmpegDownloads(), TimeProvider.System),
             (_, _) => Task.FromResult(new FfmpegInfo("ffmpeg, in the sample", true)));
     }
 
@@ -129,6 +131,31 @@ public static class SampleServices
             },
             Job("summit.mp4", Video("Summit day"), JobState.Queued, TimeSpan.FromMinutes(10)),
         ];
+    }
+
+    /// <summary>Looks like a download, and fetches nothing.</summary>
+    private sealed class SampleFfmpegDownloads : IFfmpegDownloads
+    {
+        private const long Size = 115 * 1024 * 1024;
+
+        public Task<string> GetLatestVersionAsync(CancellationToken cancellationToken = default) => Task.FromResult("9.0.2");
+
+        public async Task<string> InstallAsync(string version, IProgress<FfmpegDownloadProgress>? progress = null, CancellationToken cancellationToken = default)
+        {
+            for (var percent = 0; percent < 100; percent += 2)
+            {
+                progress?.Report(new FfmpegDownloadProgress(Size * percent / 100, Size));
+                await Task.Delay(100, cancellationToken);
+            }
+
+            progress?.Report(new FfmpegDownloadProgress(Size, Size, IsUnpacking: true));
+            await Task.Delay(1000, cancellationToken);
+            return $@"C:\Sample\ffmpeg\{version}\ffmpeg.exe";
+        }
+
+        public void RemoveAllExcept(string? path)
+        {
+        }
     }
 
     /// <summary>Takes about as long as a short video might, and changes nothing.</summary>
