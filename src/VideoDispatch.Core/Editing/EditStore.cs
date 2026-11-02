@@ -48,9 +48,39 @@ public sealed class EditStore(string? path, EditProject? initial = null)
         {
             var read = JsonSerializer.Deserialize<EditProject>(File.ReadAllBytes(path), StoredJson.Options);
 
-            // A clip that doesn't make sense is left out, rather than shown wrong.
-            var clips = read?.Clips?.Where(clip => clip is { SourcePath.Length: > 0 } && clip.Start >= TimeSpan.Zero && clip.End > clip.Start && clip.End <= clip.SourceLength).ToList();
-            return clips is { Count: > 0 } ? new EditProject(clips) : EditProject.Empty;
+            if (read is null)
+            {
+                return EditProject.Empty;
+            }
+
+            // Anything that doesn't make sense is left out, rather than shown wrong, and settings out of range are brought in.
+            var project = EditProject.Empty;
+            foreach (var clip in read.Clips ?? [])
+            {
+                if (clip is { SourcePath.Length: > 0 } && clip.Start >= TimeSpan.Zero && clip.End > clip.Start && clip.End <= clip.SourceLength)
+                {
+                    project = project.Insert(clip);
+                    project = project.ChangeClip(project.Clips.Count - 1, clip);
+                }
+            }
+
+            foreach (var sound in read.Sounds ?? [])
+            {
+                if (sound is { SourcePath.Length: > 0 } && sound.Start >= TimeSpan.Zero && sound.End > sound.Start && sound.End <= sound.SourceLength)
+                {
+                    project = project.AddSound(sound);
+                }
+            }
+
+            foreach (var text in read.Texts ?? [])
+            {
+                if (text is { Text.Length: > 0 } && Enum.IsDefined(text.Place) && Enum.IsDefined(text.Size) && Enum.IsDefined(text.Colour))
+                {
+                    project = project.AddText(text);
+                }
+            }
+
+            return project;
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or JsonException)
         {

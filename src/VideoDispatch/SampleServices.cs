@@ -78,11 +78,22 @@ public static class SampleServices
         var length = SampleVideo.Duration!.Value;
         var edit = new EditProject(
         [
-            new EditClip(@"C:\Videos\lake-morning.mp4", length, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(16.5)),
-            new EditClip(@"C:\Videos\ridge-walk.mp4", length, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(9)),
-            new EditClip(@"C:\Videos\ridge-walk.mp4", length, TimeSpan.FromSeconds(21), TimeSpan.FromSeconds(30.4)),
-            new EditClip(@"C:\Videos\summit.mp4", length, TimeSpan.Zero, TimeSpan.FromSeconds(11.2)),
-        ]);
+            new EditClip(@"C:\Videos\lake-morning.mp4", length, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(16.5)) { FadeIn = TimeSpan.FromSeconds(1) },
+            new EditClip(@"C:\Videos\ridge-walk.mp4", length, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(9)) { Crossfade = TimeSpan.FromSeconds(1.5) },
+            new EditClip(@"C:\Videos\ridge-walk.mp4", length, TimeSpan.FromSeconds(21), TimeSpan.FromSeconds(30.4)) { Zoom = 1.6, ZoomX = 0.4, ZoomY = 0.6, Volume = 0.4 },
+            new EditClip(@"C:\Videos\summit.mp4", length, TimeSpan.Zero, TimeSpan.FromSeconds(11.2)) { Crossfade = TimeSpan.FromSeconds(1), FadeOut = TimeSpan.FromSeconds(2) },
+        ])
+        {
+            Sounds =
+            [
+                new EditSound(@"C:\Music\evening-guitar.mp3", TimeSpan.FromSeconds(95), TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(48), TimeSpan.FromSeconds(3)) { Volume = 0.6, FadeIn = TimeSpan.FromSeconds(2), FadeOut = TimeSpan.FromSeconds(3) },
+            ],
+            Texts =
+            [
+                new EditText("Morning on the lake", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(4)) { Place = TextPlace.Top, Size = TextSize.Large },
+                new EditText("Day 2: up the ridge", TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(3.5)) { Box = true },
+            ],
+        };
 
         return new Services(
             accounts,
@@ -134,7 +145,7 @@ public static class SampleServices
         public Task EncodeAsync(string input, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default) =>
             Task.CompletedTask;
 
-        public async Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+        public async Task RenderAsync(EditProject project, EditWork work, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
         {
             for (var percent = 0; percent < 100; percent += 2)
             {

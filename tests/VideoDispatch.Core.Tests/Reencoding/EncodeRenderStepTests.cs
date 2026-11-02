@@ -277,7 +277,7 @@ public sealed class EncodeRenderStepTests : IDisposable
             File.WriteAllBytes(output, new byte[OutputSize]);
         }
 
-        public Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default) =>
+        public Task RenderAsync(EditProject project, EditWork work, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("The queue never saves edits.");
     }
 }

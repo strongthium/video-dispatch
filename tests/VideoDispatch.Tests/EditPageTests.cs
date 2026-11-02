@@ -93,7 +93,7 @@ public sealed class EditPageTests : IDisposable
         WindowsVideoEncoderTests.MarkRotatedClockwise(phone);
         var project = new EditProject([EditClip.Whole(phone, Seconds(2))]);
 
-        var (top, bottom, sides) = await OnWindowThreadAsync(async (page, panel) =>
+        var (top, bottom, tall) = await OnWindowThreadAsync(async (page, panel) =>
         {
             var player = (MediaElement)page.FindName("Player");
             ((Button)page.FindName("PlayButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
@@ -102,17 +102,72 @@ public sealed class EditPageTests : IDisposable
                 await Task.Delay(100);
             }
 
-            // The whole preview, as it's seen: a tall picture fills its height, with black either side.
+            // The preview's frame, which is the saved video's shape: tall, and filled by the turned picture.
             var shown = (FrameworkElement)player.Parent;
             var picture = Picture(shown);
             return (ColourAt(picture, shown.ActualWidth / 2, shown.ActualHeight / 4),
                 ColourAt(picture, shown.ActualWidth / 2, shown.ActualHeight * 3 / 4),
-                ColourAt(picture, 4, shown.ActualHeight / 2));
+                shown.ActualHeight > shown.ActualWidth);
         }, project);
 
         Assert.Equal("red", top);
         Assert.Equal("blue", bottom);
-        Assert.Equal("other", sides);
+        Assert.True(tall, "The frame should be tall.");
+    }
+
+    [Fact]
+    public async Task Paused_the_preview_shows_zoom_fades_and_words_as_saving_does()
+    {
+        // Red on the left half, blue on the right; zoomed into the right half, darkened halfway by a fade, with words.
+        await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
+        var halves = await TestVideos.MakeAsync(_folder, "halves.mp4", 640, 360);
+        var project = new EditProject([EditClip.Whole(halves, Seconds(2)) with { Zoom = 2, ZoomX = 0.75, ZoomY = 0.5, FadeIn = Seconds(1) }])
+        {
+            Texts = [new EditText("Hello", Seconds(0), Seconds(1))],
+        };
+
+        var (left, darkness, words) = await OnWindowThreadAsync(async (page, panel) =>
+        {
+            panel.Position = Seconds(0.5);
+            await Task.Delay(1500);
+            var pictures = (FrameworkElement)page.FindName("Pictures");
+            var shown = ColourAt(Picture(pictures), 8, pictures.ActualHeight / 2);
+            return (shown, ((FrameworkElement)page.FindName("Darken")).Opacity, ((Panel)page.FindName("Words")).Children.Count);
+        }, project);
+
+        Assert.Equal("blue", left);
+        Assert.Equal(0.5, darkness, 2);
+        Assert.Equal(1, words);
+    }
+
+    [Fact]
+    public async Task Saving_from_the_window_draws_the_words_into_the_video()
+    {
+        // Large black words in a white box, in the middle of a blue picture.
+        await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
+        var blue = await TestVideos.MakeSecondsAsync(_folder, "blue.mp4", 640, 360, true, WinColor.FromArgb(255, 0, 0, 255), WinColor.FromArgb(255, 0, 0, 255));
+        var project = new EditProject([EditClip.Whole(blue, Seconds(2))])
+        {
+            Texts = [new EditText("WWWWWWWW", Seconds(0.5), Seconds(1)) { Place = TextPlace.Middle, Size = TextSize.Large, Colour = TextColour.Black, Box = true }],
+        };
+        var output = Path.Combine(_folder, "saved.mp4");
+
+        var message = await OnWindowThreadAsync(async (_, panel) =>
+        {
+            await panel.SaveAsync(output);
+            return panel.Message;
+        }, project);
+
+        Assert.Equal("Saved as saved.mp4.", message);
+        var during = await WindowsVideoEncoderTests.ReadFrameAsync(output, 1);
+        var after = await WindowsVideoEncoderTests.ReadFrameAsync(output, 1.75);
+        Assert.Equal("blue", after.ColourInTheMiddle);
+        Assert.Equal("blue", during.ColourAt(20, 20));
+
+        // Somewhere across the middle, the box or the words.
+        var across = Enumerable.Range(0, 64).Select(step => during.ColourAt(during.Width * step / 64, during.Height / 2)).ToList();
+        Assert.Contains("white", across);
+        Assert.Contains("black", across);
     }
 
     private static RenderTargetBitmap Picture(FrameworkElement element)

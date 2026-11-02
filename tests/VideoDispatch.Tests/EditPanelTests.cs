@@ -284,7 +284,7 @@ public sealed class EditPanelTests : IDisposable
 
         Assert.Equal("video", File.ReadAllText(lake));
         Assert.Null(_encoder.Project);
-        Assert.Contains("one of the videos in this edit", panel.Message);
+        Assert.Contains("one of the files in this edit", panel.Message);
     }
 
     [Fact]
@@ -322,7 +322,7 @@ public sealed class EditPanelTests : IDisposable
         var panel = NewPanel();
         await panel.AddVideosAsync([Video("lake.mp4", 10)]);
         var started = new TaskCompletionSource();
-        _encoder.Work = started;
+        _encoder.Waits = started;
 
         var saving = panel.SaveAsync(PathOf("edited.mp4"));
         await started.Task.WaitAsync(TimeSpan.FromSeconds(10));
@@ -352,30 +352,253 @@ public sealed class EditPanelTests : IDisposable
     [InlineData(3725.5, "1:02:05.5")]
     public void Times_read_as_minutes_and_seconds(double seconds, string text) => Assert.Equal(text, EditPanel.Format(Seconds(seconds)));
 
+    [Fact]
+    public async Task Dragging_a_slider_is_one_change_to_undo_and_another_setting_is_another()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 10)]);
+        var added = panel.Project;
+
+        foreach (var percent in new[] { 90d, 70, 50, 30 })
+        {
+            panel.ClipVolume = percent;
+        }
+
+        var quieter = panel.Project;
+        panel.ClipFadeIn = 0.5;
+        panel.ClipFadeIn = 1.2;
+
+        Assert.Equal(0.3, panel.Project.Clips[0].Volume, 3);
+        Assert.Equal(Seconds(1.2), panel.Project.Clips[0].FadeIn);
+        Assert.Equal("30%", panel.ClipVolumeText);
+        Assert.Equal("1.2 s", panel.ClipFadeInText);
+        panel.Undo();
+        Assert.Same(quieter, panel.Project);
+        panel.Undo();
+        Assert.Same(added, panel.Project);
+    }
+
+    [Fact]
+    public async Task Choosing_something_else_between_drags_makes_them_separate_changes()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 10)]);
+        panel.ClipZoom = 150;
+        panel.SelectedIndex = -1;
+        panel.SelectedIndex = 0;
+        panel.ClipZoom = 200;
+
+        panel.Undo();
+
+        Assert.Equal(1.5, panel.Project.Clips[0].Zoom);
+    }
+
+    [Fact]
+    public async Task Only_a_clip_with_one_before_it_can_crossfade()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 10), Video("ridge.mp4", 4)]);
+
+        panel.SelectedIndex = 0;
+        Assert.False(panel.CanCrossfade);
+        panel.SelectedIndex = 1;
+        Assert.True(panel.CanCrossfade);
+        panel.ClipCrossfade = 1;
+
+        Assert.Equal(Seconds(13), panel.Length);
+        Assert.Equal("1.0 s", panel.ClipCrossfadeText);
+        Assert.Equal("Off", panel.ClipFadeOutText);
+    }
+
+    [Fact]
+    public async Task Zooming_and_moving_what_is_in_view_change_the_chosen_clip()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 10)]);
+        Assert.False(panel.ClipIsZoomed);
+
+        panel.ClipZoom = 250;
+        panel.SetZoomCentre(0.3, 0.7);
+
+        var clip = panel.Project.Clips[0];
+        Assert.True(panel.ClipIsZoomed);
+        Assert.Equal("250%", panel.ClipZoomText);
+        Assert.Equal((2.5, 0.3, 0.7), (clip.Zoom, clip.ZoomX, clip.ZoomY));
+    }
+
+    [Fact]
+    public async Task Sounds_go_from_the_playhead_one_after_another_and_the_last_is_chosen()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        panel.Position = Seconds(5);
+
+        await panel.AddSoundsAsync([Video("song.mp3", 8), Video("birds.wav", 3)]);
+
+        Assert.Equal([Seconds(5), Seconds(13)], panel.Project.Sounds.Select(sound => sound.At));
+        Assert.Equal(1, panel.SelectedSound);
+        Assert.Equal(-1, panel.SelectedIndex);
+        Assert.True(panel.HasSoundChosen);
+        Assert.Equal("birds.wav", panel.ChosenName);
+        panel.Undo();
+        Assert.Empty(panel.Project.Sounds);
+    }
+
+    [Fact]
+    public async Task A_sound_that_cant_be_read_is_named_and_left_out()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        var broken = PathOf("broken.mp3");
+        File.WriteAllText(broken, "not sound");
+
+        await panel.AddSoundsAsync([broken], Seconds(2));
+
+        Assert.Empty(panel.Project.Sounds);
+        Assert.Contains("broken.mp3 couldn't be read as a sound", panel.Message);
+    }
+
+    [Fact]
+    public async Task A_sounds_settings_and_its_place_can_be_changed_and_it_can_be_taken_out()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        await panel.AddSoundsAsync([Video("song.mp3", 20)], Seconds(2));
+
+        panel.SoundVolume = 40;
+        panel.SoundFadeOut = 3;
+        panel.MoveSound(0, Seconds(6));
+        panel.TrimSoundStart(0, Seconds(4));
+
+        var sound = panel.Project.Sounds[0];
+        Assert.Equal(0.4, sound.Volume, 3);
+        Assert.Equal(Seconds(3), sound.FadeOut);
+        Assert.Equal((Seconds(4), Seconds(10)), (sound.Start, sound.At));
+        Assert.True(panel.CanDelete);
+        panel.DeleteSelected();
+        Assert.Empty(panel.Project.Sounds);
+        Assert.False(panel.HasSelection);
+    }
+
+    [Fact]
+    public async Task New_words_go_at_the_playhead_or_back_from_the_end_and_typing_is_one_change()
+    {
+        var panel = NewPanel();
+        Assert.False(panel.CanAddText);
+        await panel.AddVideosAsync([Video("lake.mp4", 10)]);
+        panel.Position = Seconds(9);
+
+        panel.AddText();
+        var added = panel.Project;
+        foreach (var typed in new[] { "H", "Hi", "Hi there" })
+        {
+            panel.TextContent = typed;
+        }
+
+        var text = Assert.Single(panel.Project.Texts);
+        Assert.Equal(Seconds(7), text.At);
+        Assert.Equal("Hi there", text.Text);
+        Assert.True(panel.HasTextChosen);
+        panel.Undo();
+        Assert.Same(added, panel.Project);
+    }
+
+    [Fact]
+    public async Task How_words_look_can_be_chosen()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 10)]);
+        panel.AddText();
+
+        panel.TextPlaceIndex = (int)TextPlace.Top;
+        panel.TextSizeIndex = (int)TextSize.Large;
+        panel.TextColourIndex = (int)TextColour.Yellow;
+        panel.TextHasBox = true;
+        panel.TextSeconds = 5;
+        panel.TextPlaceIndex = 9;
+
+        var text = panel.Project.Texts[0];
+        Assert.Equal((TextPlace.Top, TextSize.Large, TextColour.Yellow, true, Seconds(5)), (text.Place, text.Size, text.Colour, text.Box, text.Length));
+    }
+
+    [Fact]
+    public async Task Saving_draws_the_words_at_the_frames_size_and_tidies_up_after()
+    {
+        var drawn = new List<(string, int, int)>();
+        var panel = new EditPanel(
+            _store,
+            path => _videos.GetValueOrDefault(path),
+            (path, _) => Task.FromResult(_lengths.GetValueOrDefault(path)),
+            () => _encoder,
+            File.Exists,
+            (text, width, height) =>
+            {
+                drawn.Add((text.Text, width, height));
+                return [1, 2, 3];
+            });
+        await panel.AddVideosAsync([Video("lake.mp4", 10, 720, 1280)]);
+        panel.AddText();
+        panel.TextContent = "Hello";
+
+        await panel.SaveAsync(PathOf("edited.mp4"));
+
+        Assert.Equal([("Hello", 720, 1280)], drawn);
+        Assert.Equal([[1, 2, 3]], _encoder.Pictures);
+        Assert.False(Directory.Exists(_encoder.Work!.Folder));
+    }
+
+    [Fact]
+    public async Task A_sound_gone_missing_stops_saving_too()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 10)]);
+        await panel.AddSoundsAsync([Video("song.mp3", 5)]);
+        File.Delete(PathOf("song.mp3"));
+
+        await panel.SaveAsync(PathOf("edited.mp4"));
+
+        Assert.Null(_encoder.Project);
+        Assert.Contains("song.mp3 can't be found", panel.Message);
+    }
+
+    [Theory]
+    [InlineData("song.MP3", true)]
+    [InlineData("birds.wav", true)]
+    [InlineData("voice.m4a", true)]
+    [InlineData("lake.mp4", false)]
+    public void Sounds_are_told_from_videos_by_their_names(string name, bool sound) => Assert.Equal(sound, EditPanel.IsSoundFile(name));
+
     private sealed class FakeEncoder : IVideoEncoder
     {
         public EditProject? Project { get; private set; }
 
         public EncodePlan? Plan { get; private set; }
 
+        public EditWork? Work { get; private set; }
+
+        public List<byte[]> Pictures { get; } = [];
+
         public Exception? Fails { get; set; }
 
         /// <summary>Set to make it wait, once it has started, until it's stopped.</summary>
-        public TaskCompletionSource? Work { get; set; }
+        public TaskCompletionSource? Waits { get; set; }
 
         public Task EncodeAsync(string input, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException("The editor only saves edits.");
 
-        public async Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+        public async Task RenderAsync(EditProject project, EditWork work, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
         {
             Project = project;
             Plan = plan;
+            Work = work;
             Assert.EndsWith(".part.mp4", output);
+            Assert.True(Directory.Exists(work.Folder));
+            Pictures.AddRange(work.TextPictures.Select(File.ReadAllBytes));
             await File.WriteAllTextAsync(output, "made", cancellationToken);
 
-            if (Work is { } work)
+            if (Waits is { } waits)
             {
-                work.TrySetResult();
+                waits.TrySetResult();
                 await Task.Delay(Timeout.Infinite, cancellationToken);
             }
 

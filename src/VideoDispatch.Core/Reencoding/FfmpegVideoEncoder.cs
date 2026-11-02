@@ -51,18 +51,18 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
 
     /// <summary>
     /// The arguments for an edit. Each clip is read from its own part of its video, fitted inside the plan's size with
-    /// black bars if its shape differs, and made exactly as long as it should be, so picture and sound stay together
-    /// across the joins. A clip from a video with no sound gets silence, since every clip needs both to be joined.
+    /// black bars if its shape differs, zoomed and faded, and made exactly as long as it should be. Clips are joined end
+    /// to end, or faded into each other where they overlap. The words go over the top, and the sound, already mixed, is
+    /// <paramref name="sound"/>.
     /// </summary>
-    /// <param name="hasSound">Whether a video has a sound track.</param>
-    public static IReadOnlyList<string> ArgumentsFor(EditProject project, string output, EncodePlan plan, Func<string, bool> hasSound)
+    /// <param name="sound">All of the edit's sound, as long as the edit, from <see cref="SoundMixer"/>.</param>
+    public static IReadOnlyList<string> ArgumentsFor(EditProject project, EditWork work, string sound, string output, EncodePlan plan)
     {
         var arguments = new List<string> { "-hide_banner", "-v", "error", "-nostdin", "-y" };
         var width = plan.Width ?? 1920;
         var height = plan.Height ?? 1080;
         var frames = Number(plan.FramesPerSecond ?? 30);
         var filters = new List<string>();
-        var joins = new StringBuilder();
         var input = 0;
 
         for (var index = 0; index < project.Clips.Count; index++)
@@ -70,44 +70,100 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
             var clip = project.Clips[index];
             var length = Number(clip.Length.TotalSeconds);
             arguments.AddRange(["-ss", Number(clip.Start.TotalSeconds), "-t", length, "-i", clip.SourcePath]);
-            var picture = input++;
 
-            var sound = $"[{picture}:a:0]";
-            if (!hasSound(clip.SourcePath))
+            var chain = new StringBuilder(string.Create(CultureInfo.InvariantCulture,
+                $"[{input++}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={frames},format=yuv420p,tpad=stop_mode=clone:stop_duration={length},trim=duration={length},setpts=PTS-STARTPTS"));
+
+            if (clip.IsZoomed)
             {
-                arguments.AddRange(["-f", "lavfi", "-t", length, "-i", "anullsrc=r=48000:cl=stereo"]);
-                sound = $"[{input++}:a:0]";
+                // The part of the frame that's seen, stretched back to fill it.
+                var (left, top, size) = clip.ZoomedView();
+                var across = Even(width * size);
+                var down = Even(height * size);
+                var x = Math.Min((int)Math.Round(width * left), width - across);
+                var y = Math.Min((int)Math.Round(height * top), height - down);
+                chain.Append(CultureInfo.InvariantCulture, $",crop={across}:{down}:{x}:{y},scale={width}:{height},setsar=1");
             }
 
-            filters.Add(string.Create(CultureInfo.InvariantCulture,
-                $"[{picture}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={frames},format=yuv420p,tpad=stop_mode=clone:stop_duration={length},trim=duration={length},setpts=PTS-STARTPTS[v{index}]"));
-            filters.Add($"{sound}aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=duration={length},asetpts=PTS-STARTPTS[a{index}]");
-            joins.Append(CultureInfo.InvariantCulture, $"[v{index}][a{index}]");
+            if (project.FadeInOf(index) is { TotalSeconds: > 0 } fadeIn)
+            {
+                chain.Append(CultureInfo.InvariantCulture, $",fade=t=in:st=0:d={Number(fadeIn.TotalSeconds)}:color=black");
+            }
+
+            if (project.FadeOutOf(index) is { TotalSeconds: > 0 } fadeOut)
+            {
+                chain.Append(CultureInfo.InvariantCulture, $",fade=t=out:st={Number((clip.Length - fadeOut).TotalSeconds)}:d={Number(fadeOut.TotalSeconds)}:color=black");
+            }
+
+            filters.Add($"{chain}[v{index}]");
         }
 
-        filters.Add(string.Create(CultureInfo.InvariantCulture, $"{joins}concat=n={project.Clips.Count}:v=1:a=1[v][a]"));
-        arguments.AddRange(["-filter_complex", string.Join(";", filters), "-map", "[v]", "-map", "[a]"]);
+        // Joined one at a time, so each join can be a cut or a fade.
+        var joined = "v0";
+        for (var index = 1; index < project.Clips.Count; index++)
+        {
+            var overlap = project.OverlapBefore(index);
+            filters.Add(overlap > TimeSpan.Zero
+                ? $"[{joined}][v{index}]xfade=transition=fade:duration={Number(overlap.TotalSeconds)}:offset={Number(project.StartOf(index).TotalSeconds)}[j{index}]"
+                : $"[{joined}][v{index}]concat=n=2:v=1:a=0[j{index}]");
+            joined = $"j{index}";
+        }
+
+        // Each picture of words is the whole frame, shown only while its words are.
+        for (var index = 0; index < project.Texts.Count && index < work.TextPictures.Count; index++)
+        {
+            var text = project.Texts[index];
+            var finish = text.Finish < project.Length ? text.Finish : project.Length;
+            if (finish <= text.At)
+            {
+                continue;
+            }
+
+            arguments.AddRange(["-loop", "1", "-framerate", frames, "-t", Number(finish.TotalSeconds), "-i", work.TextPictures[index]]);
+            filters.Add($"[{joined}][{input++}:v:0]overlay=0:0:eof_action=pass:enable='between(t,{Number(text.At.TotalSeconds)},{Number(finish.TotalSeconds)})',format=yuv420p[t{index}]");
+            joined = $"t{index}";
+        }
+
+        arguments.AddRange(["-i", sound]);
+        var soundInput = input;
+        arguments.AddRange(["-filter_complex", string.Join(";", filters), "-map", $"[{joined}]", "-map", $"{soundInput}:a:0", "-t", Number(project.Length.TotalSeconds)]);
         AddOutput(arguments, output, plan);
         return arguments;
     }
+
+    /// <summary>The arguments that read a stretch of a file's sound out as 48 kHz 16-bit stereo WAV, for <see cref="SoundMixer"/>.</summary>
+    public static IReadOnlyList<string> ArgumentsFor(SoundPiece piece, string output) =>
+    [
+        "-hide_banner", "-v", "error", "-nostdin", "-y",
+        "-ss", Number(piece.From.TotalSeconds), "-t", Number(piece.Length.TotalSeconds), "-i", piece.SourcePath,
+        "-map", "0:a:0", "-vn", "-ac", "2", "-ar", SoundMixer.Rate.ToString(CultureInfo.InvariantCulture), "-c:a", "pcm_s16le", "-f", "wav", output,
+    ];
 
     public async Task EncodeAsync(string input, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
     {
         await RunAsync(ArgumentsFor(input, output, plan), plan.Duration, progress, "FFmpeg couldn't re-encode this video", cancellationToken);
     }
 
-    public async Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+    public async Task RenderAsync(EditProject project, EditWork work, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
     {
-        var withSound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var source in project.Sources)
+        var withSound = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        var sound = Path.Combine(work.Folder, "sound.wav");
+        await SoundMixer.MixAsync(project, work.Folder, sound, async (piece, path, cancel) =>
         {
-            if (await HasSoundAsync(source, cancellationToken))
+            if (!withSound.TryGetValue(piece.SourcePath, out var has))
             {
-                withSound.Add(source);
+                withSound[piece.SourcePath] = has = await HasSoundAsync(piece.SourcePath, cancel);
             }
-        }
 
-        await RunAsync(ArgumentsFor(project, output, plan, withSound.Contains), plan.Duration, progress, "FFmpeg couldn't save this edit", cancellationToken);
+            if (has)
+            {
+                await RunAsync(ArgumentsFor(piece, path), null, null, $"FFmpeg couldn't read the sound in {Path.GetFileName(piece.SourcePath)}", cancel);
+            }
+
+            return has;
+        }, cancellationToken);
+
+        await RunAsync(ArgumentsFor(project, work, sound, output, plan), plan.Duration, progress, "FFmpeg couldn't save this edit", cancellationToken);
     }
 
     /// <summary>Asked of FFmpeg, which lists a video's streams when given nothing to do with it.</summary>
@@ -174,6 +230,9 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
     private static string Bits(long bitsPerSecond) => bitsPerSecond.ToString(CultureInfo.InvariantCulture);
 
     private static string Number(double value) => value.ToString("0.######", CultureInfo.InvariantCulture);
+
+    /// <summary>H.264 refuses odd sizes.</summary>
+    private static int Even(double value) => Math.Max(2, (int)Math.Round(value / 2) * 2);
 
     /// <summary>The first line, without the <c>[libx264 @ 000001A2]</c> that says which part of FFmpeg is talking.</summary>
     private static string FirstErrorIn(string text)

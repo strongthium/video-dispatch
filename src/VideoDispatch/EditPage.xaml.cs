@@ -16,32 +16,52 @@ namespace VideoDispatch.App;
 /// <summary>
 /// Draws the edit and turns the mouse and keys into changes to it. The preview is a still read from the video when
 /// paused, which lands on the exact frame, and WPF's own player while playing, one clip after another. WPF's player was
-/// tried for the stills too, and when paused it sometimes kept showing an earlier picture.
+/// tried for the stills too, and when paused it sometimes kept showing an earlier picture. Zoom, fades and words are
+/// drawn over both, the same way saving draws them. While playing, a crossfade shows the next clip's first picture
+/// fading in, since there's only one player, and the sounds laid over the edit play alongside it.
 /// </summary>
 public sealed partial class EditPage : UserControl
 {
     private const double ClipTop = 24;
-    private const double ClipHeight = 76;
+    private const double ClipHeight = 64;
+    private const double LaneHeight = 26;
+    private const double LaneGap = 4;
+    private const double TextHeight = 22;
     private const double EdgeGrip = 7;
     private const double RoomAfter = 80;
     private const double DragStarts = 4;
     private const int StillHeight = 540;
     private const int PictureHeight = 144;
+    private const double SnapshotLongestSide = 960;
     private static readonly TimeSpan OneFrame = TimeSpan.FromSeconds(1.0 / 30);
+    private static readonly TimeSpan SoundDrift = TimeSpan.FromMilliseconds(300);
     private static readonly double[] RulerSteps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
+    private static readonly Brush SoundFill = Frozen(Color.FromArgb(0x99, 0x2E, 0x8B, 0x57));
+    private static readonly Brush TextFill = Frozen(Color.FromArgb(0x99, 0x7A, 0x5A, 0xF8));
+    private static readonly Brush Shade = Frozen(Color.FromArgb(0x77, 0, 0, 0));
 
     private readonly Func<string, TimeSpan, int, CancellationToken, Task<ImageSource?>> _readFrame;
     private readonly Dictionary<(string Path, long Ticks), ImageSource?> _pictures = [];
     private readonly DispatcherTimer _clock = new(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(30) };
+    private readonly List<(Rect Area, EditItem Item, int Index)> _hits = [];
+    private readonly Dictionary<int, SoundLayer> _soundLayers = [];
 
     private EditPanel? _panel;
     private EditProject? _drawn;
+    private (EditItem, int, int, int) _drawnChoice;
     private EditProject? _trimmed;
     private Drag? _drag;
+    private ZoomDrag? _zoomDrag;
     private Rectangle? _playhead;
     private Rectangle? _landing;
     private CancellationTokenSource? _stillLoad;
+    private CancellationTokenSource? _overLoad;
     private TimeSpan? _stillAt;
+    private (string? Under, TimeSpan UnderAt, string? Over, TimeSpan OverAt) _stillKey;
+    private List<EditText> _shownTexts = [];
+    private (double Width, double Height) _wordsSize;
+    private double _soundTop;
+    private double _textTop;
     private bool _playing;
     private bool _switching;
     private bool _fitted;
@@ -51,6 +71,7 @@ public sealed partial class EditPage : UserControl
     private TimeSpan _playingClipStart;
     private string? _openSource;
     private DateTime _seekedAt;
+    private ImageSource? _nextPicture;
 
     /// <param name="readFrame">The picture in a video at a moment of its own, at a height, or null if it can't be read.</param>
     public EditPage(Func<string, TimeSpan, int, CancellationToken, Task<ImageSource?>> readFrame)
@@ -82,7 +103,11 @@ public sealed partial class EditPage : UserControl
             ShowStill();
             Focus();
         };
-        Unloaded += (_, _) => Stop();
+        Unloaded += (_, _) =>
+        {
+            Stop();
+            CloseSoundLayers();
+        };
         TimelineScroll.SizeChanged += (_, _) =>
         {
             // Until the zoom is chosen, all of the edit stays in view.
@@ -100,6 +125,10 @@ public sealed partial class EditPage : UserControl
         Timeline.MouseMove += Timeline_MouseMove;
         Timeline.MouseLeftButtonUp += Timeline_MouseUp;
         Timeline.LostMouseCapture += (_, _) => EndDrag(commit: false);
+        Screen.MouseLeftButtonDown += Frame_MouseDown;
+        Screen.MouseMove += Frame_MouseMove;
+        Screen.MouseLeftButtonUp += (_, _) => EndZoomDrag();
+        Screen.LostMouseCapture += (_, _) => _zoomDrag = null;
         PreviewKeyDown += Page_KeyDown;
         DragOver += Page_DragOver;
         Drop += Page_Drop;
@@ -121,6 +150,13 @@ public sealed partial class EditPage : UserControl
 
     private EditProject Shown => _trimmed ?? Panel.Project;
 
+    private static SolidColorBrush Frozen(Color colour)
+    {
+        var brush = new SolidColorBrush(colour);
+        brush.Freeze();
+        return brush;
+    }
+
     private void Panel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (!ReferenceEquals(Panel.Project, _drawn) && _drag is null)
@@ -129,6 +165,8 @@ public sealed partial class EditPage : UserControl
             {
                 Stop();
             }
+
+            CloseSoundLayers();
 
             // Videos into an empty edit: show all of them.
             if (_drawn is not { Clips.Count: > 0 })
@@ -140,12 +178,21 @@ public sealed partial class EditPage : UserControl
             Redraw();
             _stillAt = null;
         }
+        else if ((Panel.Chosen, Panel.SelectedIndex, Panel.SelectedSound, Panel.SelectedText) != _drawnChoice && _drag is null)
+        {
+            // Something else chosen, so the outline moves.
+            Redraw();
+        }
 
         MessageText.Foreground = (Brush)FindResource(Panel.MessageIsError ? "SystemFillColorCriticalBrush" : "TextFillColorPrimaryBrush");
         MovePlayhead();
         if (!_playing && _drag?.Kind is not (DragKind.TrimStart or DragKind.TrimEnd) && _stillAt != Panel.Position)
         {
             ShowStill();
+        }
+        else if (!_playing)
+        {
+            ApplyView(Shown, Panel.Position);
         }
     }
 
@@ -158,22 +205,52 @@ public sealed partial class EditPage : UserControl
             return;
         }
 
+        var (frameWidth, frameHeight) = Panel.FrameSize;
+        Screen.Width = frameWidth;
+        Screen.Height = frameHeight;
+
         var project = Shown;
         var perSecond = PixelsPerSecond;
         Timeline.Children.Clear();
+        _hits.Clear();
+
+        var lanes = SoundLanes(project, out var laneCount);
+        _soundTop = ClipTop + ClipHeight + 8;
+        _textTop = _soundTop + (Math.Max(1, laneCount) * (LaneHeight + LaneGap)) + 4;
+        Timeline.Height = _textTop + TextHeight + 8;
         Timeline.Width = Math.Max(TimelineScroll.ViewportWidth, (project.Length.TotalSeconds * perSecond) + RoomAfter);
 
         DrawRuler(perSecond);
-        var left = 0d;
         for (var index = 0; index < project.Clips.Count; index++)
         {
-            var clip = project.Clips[index];
-            var width = clip.Length.TotalSeconds * perSecond;
-            var block = DrawClip(clip, index, width);
-            Canvas.SetLeft(block, left);
-            Canvas.SetTop(block, ClipTop);
-            Timeline.Children.Add(block);
-            left += width;
+            var left = project.StartOf(index).TotalSeconds * perSecond;
+            var width = project.Clips[index].Length.TotalSeconds * perSecond;
+            Place(DrawClip(project, index, width), new Rect(left, ClipTop, width, ClipHeight), EditItem.Clip, index);
+        }
+
+        if (project.Sounds.Count == 0)
+        {
+            Hint("Music and other sounds go here. Choose Sound, or drop them on this line.", _soundTop);
+        }
+
+        for (var index = 0; index < project.Sounds.Count; index++)
+        {
+            var sound = project.Sounds[index];
+            var width = sound.Length.TotalSeconds * perSecond;
+            var top = _soundTop + (lanes[index] * (LaneHeight + LaneGap));
+            Place(DrawSound(project, index, width), new Rect(sound.At.TotalSeconds * perSecond, top, width, LaneHeight), EditItem.Sound, index);
+        }
+
+        if (project.Texts.Count == 0)
+        {
+            Hint("Words over the picture go here. Choose Words to add some.", _textTop);
+        }
+
+        for (var index = 0; index < project.Texts.Count; index++)
+        {
+            var text = project.Texts[index];
+            var width = text.Length.TotalSeconds * perSecond;
+            Place(DrawWords(text, index, width), new Rect(text.At.TotalSeconds * perSecond, _textTop, width, TextHeight), EditItem.Text, index);
         }
 
         _landing = new Rectangle { Width = 3, Height = ClipHeight + 8, Fill = Brush("AccentFillColorDefaultBrush"), IsHitTestVisible = false, Visibility = Visibility.Collapsed };
@@ -190,6 +267,50 @@ public sealed partial class EditPage : UserControl
         {
             _drawn = Panel.Project;
         }
+
+        _drawnChoice = (Panel.Chosen, Panel.SelectedIndex, Panel.SelectedSound, Panel.SelectedText);
+    }
+
+    /// <summary>Which line each sound goes on: the first one free when it starts, so sounds that overlap are seen apart.</summary>
+    private static int[] SoundLanes(EditProject project, out int count)
+    {
+        var lanes = new int[project.Sounds.Count];
+        var ends = new List<TimeSpan>();
+        foreach (var index in Enumerable.Range(0, project.Sounds.Count).OrderBy(each => project.Sounds[each].At))
+        {
+            var sound = project.Sounds[index];
+            var lane = ends.FindIndex(end => end <= sound.At);
+            if (lane < 0)
+            {
+                lane = ends.Count;
+                ends.Add(sound.Finish);
+            }
+            else
+            {
+                ends[lane] = sound.Finish;
+            }
+
+            lanes[index] = lane;
+        }
+
+        count = ends.Count;
+        return lanes;
+    }
+
+    private void Place(FrameworkElement element, Rect area, EditItem item, int index)
+    {
+        Canvas.SetLeft(element, area.X);
+        Canvas.SetTop(element, area.Y);
+        Timeline.Children.Add(element);
+        _hits.Add((area, item, index));
+    }
+
+    private void Hint(string text, double top)
+    {
+        var hint = new TextBlock { Text = text, FontSize = 11, Foreground = Brush("TextFillColorTertiaryBrush"), IsHitTestVisible = false };
+        Canvas.SetLeft(hint, 8);
+        Canvas.SetTop(hint, top + 5);
+        Timeline.Children.Add(hint);
     }
 
     private void DrawRuler(double perSecond)
@@ -215,9 +336,12 @@ public sealed partial class EditPage : UserControl
         ? time.ToString(@"m\:ss\.f", CultureInfo.InvariantCulture)
         : time.TotalHours >= 1 ? time.ToString(@"h\:mm\:ss", CultureInfo.InvariantCulture) : time.ToString(@"m\:ss", CultureInfo.InvariantCulture);
 
-    private Border DrawClip(EditClip clip, int index, double width)
+    private Border DrawClip(EditProject project, int index, double width)
     {
+        var clip = project.Clips[index];
         var chosen = index == Panel.SelectedIndex;
+        var perSecond = PixelsPerSecond;
+
         // The clip's first picture, again and again along it, like film.
         var content = new Grid();
         if (PictureFor(clip) is { } picture && picture.Height > 0)
@@ -233,6 +357,42 @@ public sealed partial class EditPage : UserControl
             };
         }
 
+        // Fades are shaded corners whose slope is the fade; a crossfade is a lighter band where it overlaps the clip before.
+        var overlap = project.OverlapBefore(index).TotalSeconds * perSecond;
+        if (overlap > 1)
+        {
+            content.Children.Add(new Rectangle
+            {
+                Width = overlap,
+                HorizontalAlignment = HorizontalAlignment.Left,
+                Fill = new LinearGradientBrush(Color.FromArgb(0x99, 0xFF, 0xFF, 0xFF), Color.FromArgb(0, 0xFF, 0xFF, 0xFF), 0),
+            });
+        }
+
+        var fadeIn = project.FadeInOf(index).TotalSeconds * perSecond;
+        if (fadeIn > 1)
+        {
+            content.Children.Add(new Polygon { Points = [new Point(0, 0), new Point(fadeIn, 0), new Point(0, ClipHeight)], Fill = Shade });
+        }
+
+        var fadeOut = project.FadeOutOf(index).TotalSeconds * perSecond;
+        var inner = Math.Max(width - 2, 3);
+        if (fadeOut > 1)
+        {
+            content.Children.Add(new Polygon { Points = [new Point(inner - fadeOut, 0), new Point(inner, 0), new Point(inner, ClipHeight)], Fill = Shade });
+        }
+
+        var notes = new List<string> { clip.Name, EditPanel.Format(clip.Length) };
+        if (clip.IsZoomed)
+        {
+            notes.Add($"zoom {clip.Zoom * 100:0}%");
+        }
+
+        if (clip.Volume <= 0)
+        {
+            notes.Add("muted");
+        }
+
         content.Children.Add(new Border
         {
             Background = new SolidColorBrush(Color.FromArgb(0xAA, 0, 0, 0)),
@@ -240,7 +400,7 @@ public sealed partial class EditPage : UserControl
             Padding = new Thickness(5, 1, 5, 2),
             Child = new TextBlock
             {
-                Text = $"{clip.Name}  {EditPanel.Format(clip.Length)}",
+                Text = string.Join("  ", notes),
                 Foreground = Brushes.White,
                 FontSize = 11,
                 TextTrimming = TextTrimming.CharacterEllipsis,
@@ -250,25 +410,97 @@ public sealed partial class EditPage : UserControl
         // Grips on the edges of the chosen clip, where dragging trims it.
         if (chosen)
         {
-            foreach (var side in new[] { HorizontalAlignment.Left, HorizontalAlignment.Right })
-            {
-                content.Children.Add(new Border { Width = 5, Margin = new Thickness(1, 14, 1, 14), CornerRadius = new CornerRadius(2), HorizontalAlignment = side, Background = Brush("AccentFillColorDefaultBrush") });
-            }
+            AddGrips(content, 12);
         }
 
-        return new Border
-        {
-            Width = Math.Max(width - 2, 3),
-            Height = ClipHeight,
-            CornerRadius = new CornerRadius(5),
-            BorderThickness = new Thickness(chosen ? 2 : 1),
-            BorderBrush = Brush(chosen ? "AccentFillColorDefaultBrush" : "CardStrokeColorDefaultBrush"),
-            Background = Brush("SubtleFillColorSecondaryBrush"),
-            ClipToBounds = true,
-            Tag = index,
-            Child = content,
-        };
+        return Block(inner, ClipHeight, chosen, Brush("SubtleFillColorSecondaryBrush"), content, (EditItem.Clip, index));
     }
+
+    private Border DrawSound(EditProject project, int index, double width)
+    {
+        var sound = project.Sounds[index];
+        var chosen = index == Panel.SelectedSound;
+        var inner = Math.Max(width - 1, 3);
+        var content = new Grid();
+
+        // How loud it is along its length, with its fades.
+        var line = new Polyline { Stroke = new SolidColorBrush(Color.FromArgb(0xCC, 0xFF, 0xFF, 0xFF)), StrokeThickness = 1, IsHitTestVisible = false };
+        const int Points = 40;
+        for (var point = 0; point <= Points; point++)
+        {
+            var gain = project.SoundGain(index, sound.Length * point / Points);
+            line.Points.Add(new Point(inner * point / Points, LaneHeight - 3 - (gain * (LaneHeight - 6))));
+        }
+
+        content.Children.Add(line);
+
+        // What runs past the end of the edit isn't heard.
+        var heard = project.HeardLengthOf(index).TotalSeconds * PixelsPerSecond;
+        if (heard < inner - 1)
+        {
+            content.Children.Add(new Rectangle { Width = inner - heard, HorizontalAlignment = HorizontalAlignment.Right, Fill = Shade });
+        }
+
+        content.Children.Add(new TextBlock
+        {
+            Text = sound.Volume <= 0 ? $"{sound.Name}  muted" : $"{sound.Name}  {sound.Volume * 100:0}%",
+            Foreground = Brushes.White,
+            FontSize = 11,
+            Margin = new Thickness(6, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+
+        if (chosen)
+        {
+            AddGrips(content, 5);
+        }
+
+        return Block(inner, LaneHeight, chosen, SoundFill, content, (EditItem.Sound, index));
+    }
+
+    private Border DrawWords(EditText text, int index, double width)
+    {
+        var chosen = index == Panel.SelectedText;
+        var content = new Grid();
+        content.Children.Add(new TextBlock
+        {
+            Text = text.Text.ReplaceLineEndings(" "),
+            Foreground = Brushes.White,
+            FontSize = 11,
+            Margin = new Thickness(6, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+        });
+
+        if (chosen)
+        {
+            AddGrips(content, 4);
+        }
+
+        return Block(Math.Max(width - 1, 3), TextHeight, chosen, TextFill, content, (EditItem.Text, index));
+    }
+
+    private void AddGrips(Grid content, double inset)
+    {
+        foreach (var side in new[] { HorizontalAlignment.Left, HorizontalAlignment.Right })
+        {
+            content.Children.Add(new Border { Width = 5, Margin = new Thickness(1, inset, 1, inset), CornerRadius = new CornerRadius(2), HorizontalAlignment = side, Background = Brush("AccentFillColorDefaultBrush") });
+        }
+    }
+
+    private Border Block(double width, double height, bool chosen, Brush background, UIElement content, (EditItem, int) tag) => new()
+    {
+        Width = width,
+        Height = height,
+        CornerRadius = new CornerRadius(5),
+        BorderThickness = new Thickness(chosen ? 2 : 1),
+        BorderBrush = Brush(chosen ? "AccentFillColorDefaultBrush" : "CardStrokeColorDefaultBrush"),
+        Background = background,
+        ClipToBounds = true,
+        Tag = tag,
+        Child = content,
+    };
 
     private void MovePlayhead()
     {
@@ -323,7 +555,10 @@ public sealed partial class EditPage : UserControl
         }
     }
 
-    /// <summary>Shows the exact picture under the playhead, after a moment's pause so dragging doesn't queue up dozens.</summary>
+    /// <summary>
+    /// Shows the exact picture under the playhead, and while one clip fades into another, that one over it, after a
+    /// moment's pause so dragging doesn't queue up dozens. Nothing is read again if the pictures haven't changed.
+    /// </summary>
     private async void ShowStill()
     {
         if (_panel is null)
@@ -331,17 +566,42 @@ public sealed partial class EditPage : UserControl
             return;
         }
 
-        _stillLoad?.Cancel();
         _stillAt = Panel.Position;
-        if (Shown.Find(Panel.Position) is not { } moment)
+        var project = Shown;
+        if (project.ViewAt(Panel.Position) is not { } view)
         {
+            _stillLoad?.Cancel();
+            _overLoad?.Cancel();
             Still.Source = null;
+            OverStill.Opacity = 0;
+            _stillKey = default;
+            ApplyView(project, Panel.Position);
             return;
         }
 
-        var clip = Shown.Clips[moment.Index];
-        await ShowStillAsync(clip.SourcePath, moment.SourceTime < clip.End - OneFrame ? moment.SourceTime : Max(clip.Start, clip.End - OneFrame));
+        var under = project.Clips[view.Under.Index];
+        var underAt = Before(under, view.Under.SourceTime);
+        var over = view.Over is { } look ? project.Clips[look.Index] : null;
+        var overAt = over is null ? TimeSpan.Zero : Before(over, view.Over!.SourceTime);
+        ApplyView(project, Panel.Position);
+
+        var key = (under.SourcePath, underAt, over?.SourcePath, overAt);
+        if (key == _stillKey && Player.Visibility != Visibility.Visible)
+        {
+            return;
+        }
+
+        _stillKey = key;
+        if (over is not null)
+        {
+            _ = LoadOverAsync(over.SourcePath, overAt, playing: false);
+        }
+
+        await ShowStillAsync(under.SourcePath, underAt);
     }
+
+    /// <summary>Just before a clip's very end, where there's still a picture to read.</summary>
+    private static TimeSpan Before(EditClip clip, TimeSpan at) => at < clip.End - OneFrame ? at : Max(clip.Start, clip.End - OneFrame);
 
     private async Task ShowStillAsync(string path, TimeSpan at)
     {
@@ -357,6 +617,7 @@ public sealed partial class EditPage : UserControl
             {
                 Still.Source = picture;
                 Player.Visibility = Visibility.Hidden;
+                Cover.Visibility = Visibility.Hidden;
             }
         }
         catch (OperationCanceledException)
@@ -369,6 +630,97 @@ public sealed partial class EditPage : UserControl
                 _stillLoad = null;
             }
         }
+    }
+
+    /// <summary>The picture of the clip fading in over another: where the playhead is when paused, or its first while playing.</summary>
+    private async Task LoadOverAsync(string path, TimeSpan at, bool playing)
+    {
+        _overLoad?.Cancel();
+        using var load = new CancellationTokenSource();
+        _overLoad = load;
+
+        try
+        {
+            var picture = await _readFrame(path, at, StillHeight, load.Token);
+            if (!load.IsCancellationRequested && picture is not null && _playing == playing)
+            {
+                if (playing)
+                {
+                    _nextPicture = picture;
+                }
+                else
+                {
+                    OverStill.Source = picture;
+                }
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+        finally
+        {
+            if (_overLoad == load)
+            {
+                _overLoad = null;
+            }
+        }
+    }
+
+    /// <summary>Draws what goes over the pictures at <paramref name="at"/> when paused: zoom, the crossfade, the fades and the words.</summary>
+    private void ApplyView(EditProject project, TimeSpan at)
+    {
+        if (project.ViewAt(at) is not { } view)
+        {
+            Darken.Opacity = 0;
+            OverStill.Opacity = 0;
+            ShowWords(project, at);
+            return;
+        }
+
+        StillHost.RenderTransform = ZoomOf(project.Clips[view.Under.Index]);
+        if (view.Over is { } over)
+        {
+            OverHost.RenderTransform = ZoomOf(project.Clips[over.Index]);
+            OverStill.Opacity = over.Opacity;
+        }
+        else
+        {
+            OverStill.Opacity = 0;
+        }
+
+        Darken.Opacity = view.Black;
+        ShowWords(project, at);
+    }
+
+    /// <summary>Shows the words for <paramref name="at"/>, built again only when they change.</summary>
+    private void ShowWords(EditProject project, TimeSpan at)
+    {
+        var texts = project.TextsAt(at).ToList();
+        var size = (Screen.Width, Screen.Height);
+        if (texts.SequenceEqual(_shownTexts) && size == _wordsSize)
+        {
+            return;
+        }
+
+        _shownTexts = texts;
+        _wordsSize = size;
+        Words.Children.Clear();
+        foreach (var text in texts)
+        {
+            Words.Children.Add(TextPicture.Build(text, Screen.Width, Screen.Height));
+        }
+    }
+
+    /// <summary>The frame zoomed as saving zooms it: the part in view stretched to fill it.</summary>
+    private Transform ZoomOf(EditClip clip)
+    {
+        if (!clip.IsZoomed)
+        {
+            return Transform.Identity;
+        }
+
+        var (left, top, size) = clip.ZoomedView();
+        return new MatrixTransform(1 / size, 0, 0, 1 / size, -left * Screen.Width / size, -top * Screen.Height / size);
     }
 
     private static TimeSpan Max(TimeSpan a, TimeSpan b) => a > b ? a : b;
@@ -388,8 +740,11 @@ public sealed partial class EditPage : UserControl
         }
 
         _stillLoad?.Cancel();
+        _overLoad?.Cancel();
         _playing = true;
-        PlayIcon.Text = "";
+        PlayIcon.Text = "";
+        OverStill.Opacity = 0;
+        OpenSoundLayers();
         if (Panel.Project.Find(Panel.Position) is { } moment && await StartClipAsync(moment))
         {
             _clock.Start();
@@ -398,17 +753,21 @@ public sealed partial class EditPage : UserControl
 
     private async Task<bool> StartClipAsync(EditMoment moment)
     {
-        var clip = Panel.Project.Clips[moment.Index];
+        var project = Panel.Project;
+        var clip = project.Clips[moment.Index];
         _switching = true;
         try
         {
-            // Until the player has got to where the clip starts, the last picture it showed stays up in its place.
-            if (Player.Visibility == Visibility.Visible && Snapshot() is { } last)
+            // Until the player has got to where the clip starts, the last picture shown stays up in its place.
+            if (Snapshot() is { } last)
             {
-                Still.Source = last;
+                Cover.Source = last;
+                Cover.Visibility = Visibility.Visible;
             }
 
             Player.Visibility = Visibility.Hidden;
+            OverStill.Opacity = 0;
+            _nextPicture = null;
 
             if (!string.Equals(_openSource, clip.SourcePath, StringComparison.OrdinalIgnoreCase))
             {
@@ -448,11 +807,22 @@ public sealed partial class EditPage : UserControl
                 return false;
             }
 
+            PlayerHost.RenderTransform = ZoomOf(clip);
+            Player.Volume = project.ClipGain(moment.Index, moment.SourceTime - clip.Start);
             Player.Position = moment.SourceTime;
             _seekedAt = DateTime.UtcNow;
             Player.Play();
             _playingIndex = moment.Index;
             _playingClipStart = moment.ClipStart;
+
+            // The next clip's first picture, ready to fade in over the end of this one.
+            if (project.OverlapAfter(moment.Index) > TimeSpan.Zero)
+            {
+                var next = project.Clips[moment.Index + 1];
+                OverHost.RenderTransform = ZoomOf(next);
+                _ = LoadOverAsync(next.SourcePath, next.Start, playing: true);
+            }
+
             return true;
         }
         finally
@@ -484,9 +854,12 @@ public sealed partial class EditPage : UserControl
         }
 
         Player.Visibility = Visibility.Visible;
+        Cover.Visibility = Visibility.Hidden;
         if (at < clip.End)
         {
-            Panel.Position = _playingClipStart + Max(at - clip.Start, TimeSpan.Zero);
+            var offset = Max(at - clip.Start, TimeSpan.Zero);
+            Panel.Position = _playingClipStart + offset;
+            ShowPlaying(project, _playingIndex, offset);
             return;
         }
 
@@ -498,9 +871,11 @@ public sealed partial class EditPage : UserControl
             return;
         }
 
+        // The part of the next clip that fades in over this one has been shown, as its first picture, so it starts after that.
         var following = project.Clips[next];
+        var overlap = project.OverlapBefore(next);
         var start = project.StartOf(next);
-        if (string.Equals(following.SourcePath, clip.SourcePath, StringComparison.OrdinalIgnoreCase) && following.Start == clip.End)
+        if (overlap == TimeSpan.Zero && string.Equals(following.SourcePath, clip.SourcePath, StringComparison.OrdinalIgnoreCase) && following.Start == clip.End && following.Zoom == clip.Zoom && following.ZoomX == clip.ZoomX && following.ZoomY == clip.ZoomY)
         {
             // It carries straight on in the same video.
             _playingIndex = next;
@@ -508,20 +883,44 @@ public sealed partial class EditPage : UserControl
             return;
         }
 
-        await StartClipAsync(new EditMoment(next, start, following.Start));
+        await StartClipAsync(new EditMoment(next, start, following.Start + overlap));
     }
 
-    /// <summary>What the preview is showing, as a picture: the whole of it, so a turned picture comes out as it's seen.</summary>
+    /// <summary>What goes with the playing picture at <paramref name="offset"/> into clip <paramref name="index"/>.</summary>
+    private void ShowPlaying(EditProject project, int index, TimeSpan offset)
+    {
+        var clip = project.Clips[index];
+        Player.Volume = project.ClipGain(index, offset);
+        Darken.Opacity = 1 - project.Brightness(index, offset);
+
+        var overlap = project.OverlapAfter(index);
+        var into = offset - (clip.Length - overlap);
+        if (overlap > TimeSpan.Zero && into > TimeSpan.Zero && _nextPicture is not null)
+        {
+            OverStill.Source = _nextPicture;
+            OverStill.Opacity = Math.Clamp(into / overlap, 0, 1);
+        }
+        else
+        {
+            OverStill.Opacity = 0;
+        }
+
+        ShowWords(project, Panel.Position);
+        PlaySoundLayers(project, Panel.Position);
+    }
+
+    /// <summary>What the preview's pictures show, as a picture, so a turned or zoomed picture comes out as it's seen.</summary>
     private RenderTargetBitmap? Snapshot()
     {
-        if (Player.Parent is not FrameworkElement shown || shown.ActualWidth < 2 || shown.ActualHeight < 2)
+        if (Pictures.ActualWidth < 2 || Pictures.ActualHeight < 2 || (Player.Visibility != Visibility.Visible && Still.Source is null))
         {
             return null;
         }
 
-        var scale = VisualTreeHelper.GetDpi(shown);
-        var picture = new RenderTargetBitmap((int)(shown.ActualWidth * scale.DpiScaleX), (int)(shown.ActualHeight * scale.DpiScaleY), scale.PixelsPerInchX, scale.PixelsPerInchY, PixelFormats.Pbgra32);
-        picture.Render(shown);
+        // Smaller than the frame, which can be bigger than the screen.
+        var scale = Math.Min(1, SnapshotLongestSide / Math.Max(Pictures.ActualWidth, Pictures.ActualHeight));
+        var picture = new RenderTargetBitmap((int)(Pictures.ActualWidth * scale), (int)(Pictures.ActualHeight * scale), 96 * scale, 96 * scale, PixelFormats.Pbgra32);
+        picture.Render(Pictures);
         picture.Freeze();
         return picture;
     }
@@ -532,41 +931,122 @@ public sealed partial class EditPage : UserControl
         _playing = false;
         _clock.Stop();
         Player.Pause();
-        PlayIcon.Text = "";
+        PauseSoundLayers();
+        PlayIcon.Text = "";
         if (was)
         {
+            _stillKey = default;
             ShowStill();
         }
     }
 
+    // The sounds laid over the edit, each with a player of its own while playing.
+
+    private sealed class SoundLayer(string path)
+    {
+        public MediaPlayer Player { get; } = new();
+
+        public string Path { get; } = path;
+
+        public bool Opened { get; set; }
+
+        public bool Playing { get; set; }
+    }
+
+    private void OpenSoundLayers()
+    {
+        var sounds = Panel.Project.Sounds;
+        for (var index = 0; index < sounds.Count; index++)
+        {
+            if (_soundLayers.TryGetValue(index, out var open) && open.Path == sounds[index].SourcePath)
+            {
+                continue;
+            }
+
+            var layer = new SoundLayer(sounds[index].SourcePath);
+            layer.Player.MediaOpened += (_, _) => layer.Opened = true;
+            layer.Player.Open(new Uri(layer.Path));
+            _soundLayers[index] = layer;
+        }
+    }
+
+    /// <summary>Starts, steers and stops each sound to match the playhead. One that drifts is put back where it should be.</summary>
+    private void PlaySoundLayers(EditProject project, TimeSpan at)
+    {
+        foreach (var (index, layer) in _soundLayers)
+        {
+            if (index >= project.Sounds.Count || !layer.Opened)
+            {
+                continue;
+            }
+
+            var sound = project.Sounds[index];
+            var offset = at - sound.At;
+            if (offset >= TimeSpan.Zero && offset < project.HeardLengthOf(index))
+            {
+                layer.Player.Volume = project.SoundGain(index, offset);
+                var wanted = sound.Start + offset;
+                if (!layer.Playing || (layer.Player.Position - wanted).Duration() > SoundDrift)
+                {
+                    layer.Player.Position = wanted;
+                }
+
+                if (!layer.Playing)
+                {
+                    layer.Player.Play();
+                    layer.Playing = true;
+                }
+            }
+            else if (layer.Playing)
+            {
+                layer.Player.Pause();
+                layer.Playing = false;
+            }
+        }
+    }
+
+    private void PauseSoundLayers()
+    {
+        foreach (var layer in _soundLayers.Values.Where(layer => layer.Playing))
+        {
+            layer.Player.Pause();
+            layer.Playing = false;
+        }
+    }
+
+    private void CloseSoundLayers()
+    {
+        foreach (var layer in _soundLayers.Values)
+        {
+            layer.Player.Close();
+        }
+
+        _soundLayers.Clear();
+    }
+
     // The timeline and the mouse
 
-    private sealed record Drag(DragKind Kind, Point From, int Index, EditClip? Clip, int Landing = -1);
+    private sealed record Drag(DragKind Kind, EditItem Item, Point From, int Index, object? Original, int Landing = -1);
+
+    private sealed record ZoomDrag(Point From, double X, double Y, double Size);
 
     private TimeSpan TimeAt(double x) => TimeSpan.FromSeconds(Math.Max(0, x) / PixelsPerSecond);
 
-    /// <summary>The clip at <paramref name="x"/>, and whether that's near its start or end edge.</summary>
-    private (int Index, DragKind Kind)? ClipAt(Point point)
+    /// <summary>What's at <paramref name="point"/>, topmost first, and whether that's near its start or end edge.</summary>
+    private (EditItem Item, int Index, DragKind Kind)? ItemAt(Point point)
     {
-        if (point.Y < ClipTop || point.Y > ClipTop + ClipHeight)
+        for (var each = _hits.Count - 1; each >= 0; each--)
         {
-            return null;
-        }
-
-        var perSecond = PixelsPerSecond;
-        var left = 0d;
-        var clips = Panel.Project.Clips;
-        for (var index = 0; index < clips.Count; index++)
-        {
-            var right = left + (clips[index].Length.TotalSeconds * perSecond);
-            if (point.X >= left && point.X < right)
+            var (area, item, index) = _hits[each];
+            if (!area.Contains(point))
             {
-                // A narrow clip is all body, so it can still be moved.
-                var grip = Math.Min(EdgeGrip, (right - left) / 4);
-                return point.X < left + grip ? (index, DragKind.TrimStart) : point.X > right - grip ? (index, DragKind.TrimEnd) : (index, DragKind.Pending);
+                continue;
             }
 
-            left = right;
+            // A narrow one is all body, so it can still be moved.
+            var grip = Math.Min(EdgeGrip, area.Width / 4);
+            var kind = point.X < area.Left + grip ? DragKind.TrimStart : point.X > area.Right - grip ? DragKind.TrimEnd : DragKind.Pending;
+            return (item, index, kind);
         }
 
         return null;
@@ -576,26 +1056,17 @@ public sealed partial class EditPage : UserControl
     private (int Index, double X) LandingAt(double x, int taken)
     {
         var perSecond = PixelsPerSecond;
-        var left = 0d;
-        var landing = 0;
-        for (var index = 0; index < Panel.Project.Clips.Count; index++)
+        var rest = taken >= 0 && taken < Panel.Project.Clips.Count ? Panel.Project.Remove(taken) : Panel.Project;
+        for (var index = 0; index < rest.Clips.Count; index++)
         {
-            if (index == taken)
+            var left = rest.StartOf(index).TotalSeconds * perSecond;
+            if (x < left + (rest.Clips[index].Length.TotalSeconds * perSecond / 2))
             {
-                continue;
+                return (index, left);
             }
-
-            var width = Panel.Project.Clips[index].Length.TotalSeconds * perSecond;
-            if (x < left + (width / 2))
-            {
-                return (landing, left);
-            }
-
-            left += width;
-            landing++;
         }
 
-        return (landing, left);
+        return (rest.Clips.Count, rest.Length.TotalSeconds * perSecond);
     }
 
     private void Timeline_MouseDown(object sender, MouseButtonEventArgs e)
@@ -612,21 +1083,36 @@ public sealed partial class EditPage : UserControl
             Stop();
         }
 
-        if (Panel.CanEdit && ClipAt(point) is { } hit)
+        if (Panel.CanEdit && ItemAt(point) is { } hit)
         {
-            Panel.SelectedIndex = hit.Index;
-            Redraw();
+            object original;
+            switch (hit.Item)
+            {
+                case EditItem.Sound:
+                    Panel.SelectedSound = hit.Index;
+                    original = Panel.Project.Sounds[hit.Index];
+                    break;
+                case EditItem.Text:
+                    Panel.SelectedText = hit.Index;
+                    original = Panel.Project.Texts[hit.Index];
+                    break;
+                default:
+                    Panel.SelectedIndex = hit.Index;
+                    original = Panel.Project.Clips[hit.Index];
+                    break;
+            }
+
             if (hit.Kind == DragKind.Pending)
             {
                 Panel.Position = TimeAt(point.X);
             }
 
-            _drag = new Drag(hit.Kind, point, hit.Index, Panel.Project.Clips[hit.Index]);
+            _drag = new Drag(hit.Kind, hit.Item, point, hit.Index, original);
         }
         else
         {
             Panel.Position = TimeAt(point.X);
-            _drag = new Drag(DragKind.Scrub, point, -1, null);
+            _drag = new Drag(DragKind.Scrub, EditItem.None, point, -1, null);
         }
 
         Timeline.CaptureMouse();
@@ -643,7 +1129,7 @@ public sealed partial class EditPage : UserControl
         var point = e.GetPosition(Timeline);
         if (_drag is null)
         {
-            Timeline.Cursor = ClipAt(point) switch
+            Timeline.Cursor = ItemAt(point) switch
             {
                 { Kind: DragKind.TrimStart or DragKind.TrimEnd } => Cursors.SizeWE,
                 not null => Cursors.Hand,
@@ -653,18 +1139,20 @@ public sealed partial class EditPage : UserControl
         }
 
         var moved = point.X - _drag.From.X;
+        var seconds = TimeSpan.FromSeconds(moved / PixelsPerSecond);
+        if (_drag.Kind == DragKind.Pending && Math.Abs(moved) > DragStarts)
+        {
+            _drag = _drag with { Kind = DragKind.Move };
+        }
+
         switch (_drag.Kind)
         {
             case DragKind.Scrub:
                 Panel.Position = TimeAt(point.X);
                 break;
 
-            case DragKind.Pending when Math.Abs(moved) > DragStarts:
-                _drag = _drag with { Kind = DragKind.Move };
-                goto case DragKind.Move;
-
-            case DragKind.Move:
-                var block = Timeline.Children.OfType<Border>().FirstOrDefault(found => found.Tag is int index && index == _drag.Index);
+            case DragKind.Move when _drag.Item == EditItem.Clip:
+                var block = Timeline.Children.OfType<Border>().FirstOrDefault(found => found.Tag is (EditItem.Clip, int index) && index == _drag.Index);
                 if (block is not null)
                 {
                     Canvas.SetLeft(block, (Panel.Project.StartOf(_drag.Index).TotalSeconds * PixelsPerSecond) + moved);
@@ -682,17 +1170,34 @@ public sealed partial class EditPage : UserControl
 
                 break;
 
+            case DragKind.Move:
+                _trimmed = _drag.Original switch
+                {
+                    EditSound sound => Panel.Project.MoveSound(_drag.Index, sound.At + seconds),
+                    EditText text => Panel.Project.ChangeText(_drag.Index, text with { At = text.At + seconds }),
+                    _ => null,
+                };
+                Redraw();
+                break;
+
             case DragKind.TrimStart or DragKind.TrimEnd:
-                var seconds = TimeSpan.FromSeconds(moved / PixelsPerSecond);
-                var clip = _drag.Clip!;
-                _trimmed = _drag.Kind == DragKind.TrimStart
-                    ? Panel.Project.TrimStart(_drag.Index, clip.Start + seconds)
-                    : Panel.Project.TrimEnd(_drag.Index, clip.End + seconds);
+                var start = _drag.Kind == DragKind.TrimStart;
+                _trimmed = _drag.Original switch
+                {
+                    EditClip clip => start ? Panel.Project.TrimStart(_drag.Index, clip.Start + seconds) : Panel.Project.TrimEnd(_drag.Index, clip.End + seconds),
+                    EditSound sound => start ? Panel.Project.TrimSoundStart(_drag.Index, sound.Start + seconds) : Panel.Project.TrimSoundEnd(_drag.Index, sound.End + seconds),
+                    EditText text => start ? Panel.Project.TrimTextStart(_drag.Index, text.At + seconds) : Panel.Project.TrimTextEnd(_drag.Index, text.Finish + seconds),
+                    _ => null,
+                };
                 Redraw();
 
-                // Show the picture at the edge being moved.
-                var trimmed = _trimmed.Clips[_drag.Index];
-                _ = ShowStillAsync(trimmed.SourcePath, _drag.Kind == DragKind.TrimStart ? trimmed.Start : Max(trimmed.Start, trimmed.End - OneFrame));
+                // Show the picture at the edge of a clip being moved.
+                if (_drag.Item == EditItem.Clip && _trimmed is not null)
+                {
+                    var trimmed = _trimmed.Clips[_drag.Index];
+                    _ = ShowStillAsync(trimmed.SourcePath, start ? trimmed.Start : Max(trimmed.Start, trimmed.End - OneFrame));
+                }
+
                 break;
         }
     }
@@ -716,23 +1221,41 @@ public sealed partial class EditPage : UserControl
 
         if (commit)
         {
-            switch (drag.Kind)
+            var index = drag.Index;
+            switch (drag.Kind, drag.Item)
             {
-                case DragKind.Move when drag.Landing >= 0:
-                    Panel.Move(drag.Index, drag.Landing);
+                case (DragKind.Move, EditItem.Clip) when drag.Landing >= 0:
+                    Panel.Move(index, drag.Landing);
                     break;
-
-                case DragKind.TrimStart when trimmed is not null:
-                    Panel.TrimStart(drag.Index, trimmed.Clips[drag.Index].Start);
+                case (DragKind.Move, EditItem.Sound) when trimmed is not null:
+                    Panel.MoveSound(index, trimmed.Sounds[index].At);
                     break;
-
-                case DragKind.TrimEnd when trimmed is not null:
-                    Panel.TrimEnd(drag.Index, trimmed.Clips[drag.Index].End);
+                case (DragKind.Move, EditItem.Text) when trimmed is not null:
+                    Panel.MoveText(index, trimmed.Texts[index].At);
+                    break;
+                case (DragKind.TrimStart, EditItem.Clip) when trimmed is not null:
+                    Panel.TrimStart(index, trimmed.Clips[index].Start);
+                    break;
+                case (DragKind.TrimEnd, EditItem.Clip) when trimmed is not null:
+                    Panel.TrimEnd(index, trimmed.Clips[index].End);
+                    break;
+                case (DragKind.TrimStart, EditItem.Sound) when trimmed is not null:
+                    Panel.TrimSoundStart(index, trimmed.Sounds[index].Start);
+                    break;
+                case (DragKind.TrimEnd, EditItem.Sound) when trimmed is not null:
+                    Panel.TrimSoundEnd(index, trimmed.Sounds[index].End);
+                    break;
+                case (DragKind.TrimStart, EditItem.Text) when trimmed is not null:
+                    Panel.TrimTextStart(index, trimmed.Texts[index].At);
+                    break;
+                case (DragKind.TrimEnd, EditItem.Text) when trimmed is not null:
+                    Panel.TrimTextEnd(index, trimmed.Texts[index].Finish);
                     break;
             }
         }
 
         Redraw();
+        _stillKey = default;
         ShowStill();
     }
 
@@ -765,11 +1288,64 @@ public sealed partial class EditPage : UserControl
         TimelineScroll.ScrollToHorizontalOffset(Math.Max(0, x - (TimelineScroll.ViewportWidth / 2)));
     }
 
+    // Dragging the preview moves what's in view of a zoomed clip.
+
+    private void Frame_MouseDown(object sender, MouseButtonEventArgs e)
+    {
+        Focus();
+        if (_panel is null || _playing || !Panel.CanEdit || Panel.SelectedIndex < 0 || Panel.Project.ViewAt(Panel.Position)?.Under.Index != Panel.SelectedIndex)
+        {
+            return;
+        }
+
+        var clip = Panel.Project.Clips[Panel.SelectedIndex];
+        if (!clip.IsZoomed)
+        {
+            return;
+        }
+
+        _zoomDrag = new ZoomDrag(e.GetPosition(Screen), clip.ZoomX, clip.ZoomY, clip.ZoomedView().Size);
+        Screen.CaptureMouse();
+        Screen.Cursor = Cursors.SizeAll;
+        e.Handled = true;
+    }
+
+    private void Frame_MouseMove(object sender, MouseEventArgs e)
+    {
+        if (_zoomDrag is not { } drag)
+        {
+            Screen.Cursor = _panel is { SelectedIndex: >= 0, ClipIsZoomed: true } ? Cursors.SizeAll : null;
+            return;
+        }
+
+        // The picture follows the mouse, so what's in view moves the other way.
+        var point = e.GetPosition(Screen);
+        var x = drag.X - ((point.X - drag.From.X) / Screen.Width * drag.Size);
+        var y = drag.Y - ((point.Y - drag.From.Y) / Screen.Height * drag.Size);
+        var half = drag.Size / 2;
+        Panel.SetZoomCentre(Math.Clamp(x, half, 1 - half), Math.Clamp(y, half, 1 - half));
+    }
+
+    private void EndZoomDrag()
+    {
+        _zoomDrag = null;
+        if (Screen.IsMouseCaptured)
+        {
+            Screen.ReleaseMouseCapture();
+        }
+    }
+
     // Keys, buttons and dropped files
 
     private async void Page_KeyDown(object sender, KeyEventArgs e)
     {
         if (_panel is null || e.OriginalSource is TextBox)
+        {
+            return;
+        }
+
+        // A slider or list that has the keyboard uses the arrows itself.
+        if (e.OriginalSource is Slider or ComboBox or ComboBoxItem && e.Key is Key.Left or Key.Right or Key.Up or Key.Down or Key.Home or Key.End)
         {
             return;
         }
@@ -880,6 +1456,35 @@ public sealed partial class EditPage : UserControl
         }
     }
 
+    private async void AddSound_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Title = "Add sound",
+            Multiselect = true,
+            Filter = "Sounds|*.mp3;*.wav;*.m4a;*.aac;*.wma;*.flac|The sound of a video|*.mp4;*.mov;*.m4v;*.wmv|All files|*.*",
+        };
+
+        if (dialog.ShowDialog(Window.GetWindow(this)) == true)
+        {
+            Stop();
+            await Panel.AddSoundsAsync(dialog.FileNames);
+        }
+    }
+
+    private void AddText_Click(object sender, RoutedEventArgs e)
+    {
+        Stop();
+        Panel.AddText();
+
+        // Ready to type over.
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            WordsBox.Focus();
+            WordsBox.SelectAll();
+        });
+    }
+
     private void Page_DragOver(object sender, DragEventArgs e)
     {
         e.Effects = e.Data.GetDataPresent(DataFormats.FileDrop) && Panel.CanEdit ? DragDropEffects.Copy : DragDropEffects.None;
@@ -893,11 +1498,26 @@ public sealed partial class EditPage : UserControl
             return;
         }
 
-        // Dropped on the timeline, the videos go where they were let go. Anywhere else, at the end.
+        // Sounds go where they're let go on the timeline, or at the playhead. So do videos let go on the sounds' line,
+        // as their sound. Other videos dropped on the timeline go in among the clips where they were let go, and
+        // anywhere else, at the end.
         var point = e.GetPosition(Timeline);
-        int? at = point.Y >= 0 && point.Y <= Timeline.ActualHeight && point.X >= 0 ? LandingAt(point.X, -1).Index : null;
+        var onTimeline = point.Y >= 0 && point.Y <= Timeline.ActualHeight && point.X >= 0;
+        var onSounds = onTimeline && point.Y >= _soundTop && point.Y < _textTop;
+        var existing = files.Where(File.Exists).ToList();
+        var sounds = existing.Where(file => onSounds || EditPanel.IsSoundFile(file)).ToList();
+        var videos = existing.Except(sounds).ToList();
+
         Stop();
-        await Panel.AddVideosAsync(files.Where(File.Exists).ToList(), at);
+        if (sounds.Count > 0)
+        {
+            await Panel.AddSoundsAsync(sounds, onTimeline ? TimeAt(point.X) : null);
+        }
+
+        if (videos.Count > 0)
+        {
+            await Panel.AddVideosAsync(videos, onTimeline && point.Y < _soundTop ? LandingAt(point.X, -1).Index : null);
+        }
     }
 
     private async void Save_Click(object sender, RoutedEventArgs e)

@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, fills in text from your own presets, and can compress or re-encode a video to MP4 before sending it. A simple video editor cuts, trims and joins clips into one new MP4.
+`video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, fills in text from your own presets, and can compress or re-encode a video to MP4 before sending it. A video editor cuts, trims, joins, fades and zooms clips, adds music and words over them, and saves one new MP4.
 
 It runs on Windows 10 (version 2004 or later) and 11, is one file of about 7 MB with nothing to install, and has no server. You register your own TikTok and Google apps, and your videos go straight from your PC to them.
 
@@ -37,21 +37,35 @@ For YouTube you choose privacy and made for kids yourself each time, unless a pr
 
 ![Edit](docs/edit.png)
 
-Cut videos into clips, trim them, put them in order, and save them as one new MP4. **Edit** on New post starts an edit of the chosen video, and **Use in New post** brings the saved one back to post.
+Cut videos into clips, trim them, put them in order, fade and zoom them, lay music and other sounds over them, put words on top, and save it all as one new MP4. **Edit** on New post starts an edit of the chosen video, and **Use in New post** brings the saved one back to post.
+
+The timeline has three lines: the clips, the sounds, and the words. Click anything on it to choose it, and its settings show beside the preview.
 
 | | |
 |---|---|
-| **Add videos** | drop them on the page from Explorer, or press **Add videos**. Dropped on the timeline, they go where they're let go |
+| **Videos** | drop them on the page from Explorer, or press **Videos**. Dropped among the clips, they go where they're let go |
+| **Sound** | lays music, or any sound Windows can play, over the edit from the playhead. Sound files dropped on the page go where they're let go, and so do videos dropped on the sounds' line, for their sound |
+| **Words** | puts words over the picture from the playhead, for three seconds, ready to type over |
 | **Split** (S) | cuts the clip under the playhead in two |
-| **Trim** | drag either edge of a clip. The preview shows the picture at the edge as you drag |
-| **Move** | drag a clip along the timeline to where it should go |
-| **Delete** | takes the chosen clip out. Its video isn't touched |
-| **Undo**, **Redo** (Ctrl+Z, Ctrl+Y) | every change, as far back as 100 |
-| **Play** (Space) | plays the clips in order. ← and → step a frame, with Shift a second |
+| **Trim** | drag either edge of a clip, sound or words. The preview shows the picture at a clip's edge as you drag |
+| **Move** | drag a clip to where it should go among the others, or a sound or words along the timeline |
+| **Delete** | takes out what's chosen. Its file isn't touched |
+| **Undo**, **Redo** (Ctrl+Z, Ctrl+Y) | every change, as far back as 100. Dragging a slider, or typing words, is one change |
+| **Play** (Space) | plays the edit with its sounds. ← and → step a frame, with Shift a second |
 
-Paused, the preview is the exact frame from the video. Playing, it uses Windows' own player, one clip after another, with a short pause where a clip comes from a different video. The edit is kept for next time, and holds only where the videos are and which parts are used.
+What can be set for each:
 
-**Save video** makes the new file where you choose, at the first clip's picture size and frame rate. A clip of another shape fits inside it, with black bars. The new file is high quality, since it may well be compressed again before it's sent. A key frame every two seconds lets players jump about in it. It can't be saved over one of the videos in the edit.
+| | |
+|---|---|
+| **A clip** | how loud its own sound is, a fade in from black and out to black (picture and sound together), a crossfade from the clip before, and zoom up to 400%. Drag the preview to choose what's in view when zoomed |
+| **A sound** | how loud it is, and how long it takes to fade in and out. Any part of it past the end of the edit isn't heard |
+| **Words** | the words, top, middle or bottom, three sizes, white, yellow or black, with or without a box behind them, and how long they show |
+
+A crossfade plays the two clips at once, so it makes the edit that much shorter. The timeline shows it as a pale band, and fades as shaded corners.
+
+Paused, the preview is the exact frame from the video, in the shape the video is saved at, with zoom, fades, crossfades and words drawn as saving draws them. Playing, it uses Windows' own player, one clip after another, with a short pause where a clip comes from a different video. While playing, a crossfade shows the next clip's first picture fading in, rather than that clip moving. The edit is kept for next time, and holds only where the files are and which parts are used.
+
+**Save video** makes the new file where you choose, at the first clip's picture size and frame rate. A clip of another shape fits inside it, with black bars. The new file is high quality, since it may well be compressed again before it's sent. A key frame every two seconds lets players jump about in it. It can't be saved over one of the files in the edit. While it saves, a folder named after the new file holds the sound and pictures of words it's working from, and it's removed when it's done.
 
 ### Compressing and re-encoding
 
@@ -176,12 +190,12 @@ A Google project gets 100 video uploads a day through YouTube's API, and its quo
 
 ## What hasn't been tried
 
-Everything has been tested against made-up platforms: 863 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
+Everything has been tested against made-up platforms: 924 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
 
 - A real sign-in or upload on TikTok or YouTube, or an app approval from TikTok.
 - A real video from a phone, rotated, through **New post**. Reading video details has been tried on real files, but rotation only on hand-built ones.
 - Re-encoding real footage. Both engines have really encoded test videos, including sideways ones, and **Fit a size** stayed under its limit on all of them, but those are made-up pictures. So how real footage looks, and how long a long video takes, are still to be seen.
-- Editing real footage. Windows' tools have cut, joined and saved test videos, including sideways and differently shaped ones, and the editor's own window has played them in order. FFmpeg's way of saving an edit has only been checked as the command it builds, not run.
+- Editing real footage. Windows' tools have cut, joined, zoomed, faded and crossfaded test videos, put words on them and mixed sounds into them, including sideways and differently shaped ones, and the editor's own window has played them in order. Where each sound lands, and how loud it is, was measured, but nobody has listened to an edit. FFmpeg's way of saving an edit has only been checked as the command it builds, not run.
 - **Download FFmpeg** pressed in the real app. The same download code has fetched and run the real build from gyan.dev, but from a test program, not from that button.
 - An edition of Windows without the media tools, such as N editions. Re-encoding there should say to install the Media Feature Pack or choose FFmpeg.
 - An update from a real release, because there's no release yet. The check for one has run against GitHub, and the update itself against made-up downloads.
@@ -201,9 +215,9 @@ There's no server and no telemetry. Your videos and what you write go from your 
 | | |
 |---|---|
 | **Keys, sign-ins and the addresses of unfinished uploads** | only in Windows Credential Manager, never in a plain file. Access tokens stay in memory |
-| **Jobs, presets, settings and the edit** | JSON files under `%LOCALAPPDATA%\video-dispatch`, with no secrets in them. The edit holds where its videos are and which parts are used |
+| **Jobs, presets, settings and the edit** | JSON files under `%LOCALAPPDATA%\video-dispatch`, with no secrets in them. The edit holds where its files are, which parts are used, their settings and its words |
 | **A downloaded FFmpeg** | under that same folder, if you asked for it |
-| **Your videos** | read where they are, and never changed. A re-encoded copy stays under that folder until the platforms have it. A saved edit is a new file, where you chose to save it |
+| **Your videos and sounds** | read where they are, and never changed. A re-encoded copy stays under that folder until the platforms have it. A saved edit is a new file, where you chose to save it |
 
 To remove it all, press **Disconnect** and **Remove keys** under **Accounts**, delete that folder, and delete the program.
 

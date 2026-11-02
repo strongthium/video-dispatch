@@ -208,6 +208,19 @@ Tried on 2026-11-02 with Windows' tools, on test videos where each second is its
 - **A composition keeps cuts where they were asked for,** turns a sideways phone video upright, fits a clip of another shape inside the frame with black bars, and joins a clip without sound to one with it.
 - **Windows' frame rate is reported from the file,** and these short test files read as 31 fps rather than 30. A saved edit takes the first clip's figure.
 
+Zoom, fades, crossfades, sounds and words, tried the same way on 2026-11-02:
+
+- **`VideoTransformEffectDefinition` fails in a composition** with `0xC00DA7FC`, whether given a crop, an output size, both, or only a mirror. So zoom can't be a crop. Instead the clip is drawn as an overlay bigger than the frame, over black, which the frame then cuts off. Overlays keep a phone video upright.
+- **An overlay is stretched to the rectangle it's given,** not fitted inside it. So the app works out each clip's shape from the file, fits it, and then zooms that.
+- **An overlay has one opacity for all of it,** so fades are black overlays in steps, about 12 a second, and a crossfade is the next clip as overlays in steps over the one before. Black steps cost little. A one-second crossfade added about 6 seconds to a two-second save, since each step opens the video again.
+- **A PNG's see-through parts stay see-through as an overlay.** A half see-through green over blue came out as both mixed. So words are drawn as a PNG the size of the frame.
+- **An overlay from a trimmed video starts where it's trimmed to,** when it's delayed, to the second.
+- **A clip's volume is one figure for the whole clip,** with nothing for fades. So all the sound is mixed by the app instead: each stretch is read out of its file as WAV with `MediaTranscoder`, the clips' own sound is turned off, and the mix goes in as the one background track.
+- **`MediaTranscoder.TrimStopTime` is a time in the file,** where Microsoft's documents say it's how much to leave off the end. Asked for 0.5 to 1 second, it gave half a second from 0.5.
+- **Sound read out of an MP4 is about 2 ms late,** 108 samples at 48 kHz, which is far less than a frame.
+- **A file's own profile names a sound track even for a video made silent,** so a video's sound being there doesn't mean it's not silence.
+- **An M4A reads as a `MediaClip`,** so sounds are measured as videos are.
+
 ## Sources
 
 - [TikTok inbox upload](https://developers.tiktok.com/doc/content-posting-api-reference-upload-video)

@@ -100,50 +100,131 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
         .Insert(new EditClip(@"C:\Videos\lake.mp4", TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(1.5), TimeSpan.FromSeconds(4)))
         .Insert(EditClip.Whole(@"C:\Videos\quiet.mp4", TimeSpan.FromSeconds(2)));
 
+    private static readonly EditWork NoWords = new("work", []);
+
+    private static List<string> EditArguments(EditProject project, EditWork? work = null) =>
+        FfmpegVideoEncoder.ArgumentsFor(project, work ?? NoWords, "sound.wav", "out.mp4", Size).ToList();
+
+    private static string[] Filters(List<string> arguments) => arguments[arguments.IndexOf("-filter_complex") + 1].Split(';');
+
     [Fact]
-    public void An_edit_reads_each_clip_from_its_own_part_of_its_video()
+    public void An_edit_reads_each_clip_from_its_own_part_of_its_video_and_its_sound_already_mixed()
     {
-        var arguments = FfmpegVideoEncoder.ArgumentsFor(Edit(), "out.mp4", Size, _ => true).ToList();
+        var arguments = EditArguments(Edit());
 
         Assert.Equal(["-ss", "1.5", "-t", "2.5", "-i", @"C:\Videos\lake.mp4"], arguments.Skip(arguments.IndexOf("-ss")).Take(6));
         Assert.Equal(["-ss", "0", "-t", "2", "-i", @"C:\Videos\quiet.mp4"], arguments.Skip(arguments.LastIndexOf("-ss")).Take(6));
+        Assert.Equal("sound.wav", arguments[arguments.LastIndexOf("-i") + 1]);
         Assert.Equal("out.mp4", arguments[^1]);
-        Assert.Equal("[v]", arguments[arguments.IndexOf("-map") + 1]);
-        Assert.Equal("[a]", arguments[arguments.LastIndexOf("-map") + 1]);
+        Assert.Equal("[j1]", arguments[arguments.IndexOf("-map") + 1]);
+        Assert.Equal("2:a:0", arguments[arguments.LastIndexOf("-map") + 1]);
+        Assert.Equal("4.5", arguments[arguments.IndexOf("-t", arguments.IndexOf("-filter_complex")) + 1]);
     }
 
     [Fact]
-    public void An_edit_fits_every_clip_to_one_size_and_makes_each_exactly_as_long_as_it_should_be()
+    public void An_edit_fits_every_clip_to_one_size_makes_each_exactly_as_long_as_it_should_be_and_joins_them()
     {
-        var arguments = FfmpegVideoEncoder.ArgumentsFor(Edit(), "out.mp4", Size, _ => true).ToList();
-        var filters = arguments[arguments.IndexOf("-filter_complex") + 1].Split(';');
+        var filters = Filters(EditArguments(Edit()));
 
-        Assert.Equal(5, filters.Length);
+        Assert.Equal(3, filters.Length);
         Assert.StartsWith("[0:v:0]scale=720:1280:force_original_aspect_ratio=decrease:force_divisible_by=2,pad=720:1280:", filters[0]);
         Assert.Contains("fps=30,", filters[0]);
         Assert.EndsWith("trim=duration=2.5,setpts=PTS-STARTPTS[v0]", filters[0]);
-        Assert.Equal("[0:a:0]aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=duration=2.5,asetpts=PTS-STARTPTS[a0]", filters[1]);
-        Assert.StartsWith("[1:v:0]", filters[2]);
-        Assert.Equal("[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]", filters[4]);
+        Assert.StartsWith("[1:v:0]", filters[1]);
+        Assert.Equal("[v0][v1]concat=n=2:v=1:a=0[j1]", filters[2]);
     }
 
     [Fact]
-    public void A_clip_from_a_video_without_sound_gets_silence_as_long_as_it_is()
+    public void A_zoomed_clip_shows_the_part_of_the_frame_in_view_stretched_to_fill_it()
     {
-        var arguments = FfmpegVideoEncoder.ArgumentsFor(Edit(), "out.mp4", Size, path => !path.Contains("quiet", StringComparison.Ordinal)).ToList();
-        var filters = arguments[arguments.IndexOf("-filter_complex") + 1].Split(';');
+        var project = Edit().ChangeClip(0, Edit().Clips[0] with { Zoom = 2, ZoomX = 0.75, ZoomY = 0.25 });
 
-        Assert.Equal(["-f", "lavfi", "-t", "2", "-i", "anullsrc=r=48000:cl=stereo"], arguments.Skip(arguments.IndexOf("-f")).Take(6));
-        Assert.StartsWith("[1:v:0]", filters[2]);
-        Assert.StartsWith("[2:a:0]aformat", filters[3]);
+        var first = Filters(EditArguments(project))[0];
+
+        Assert.EndsWith(",crop=360:640:360:0,scale=720:1280,setsar=1[v0]", first);
     }
 
     [Fact]
-    public async Task Saving_an_edit_asks_which_videos_have_sound_then_runs_once_with_progress()
+    public void Zoom_that_would_look_past_the_edge_stays_inside_the_frame()
     {
+        var project = Edit().ChangeClip(0, Edit().Clips[0] with { Zoom = 3, ZoomX = 1, ZoomY = 1 });
+
+        Assert.Contains(",crop=240:426:480:853,", Filters(EditArguments(project))[0]);
+    }
+
+    [Fact]
+    public void Fades_go_to_black_at_the_start_and_end_of_a_clip()
+    {
+        var project = Edit().ChangeClip(0, Edit().Clips[0] with { FadeIn = TimeSpan.FromSeconds(0.5), FadeOut = TimeSpan.FromSeconds(1) });
+
+        var first = Filters(EditArguments(project))[0];
+
+        Assert.Contains(",fade=t=in:st=0:d=0.5:color=black,fade=t=out:st=1.5:d=1:color=black[v0]", first);
+    }
+
+    [Fact]
+    public void A_crossfade_fades_one_clip_into_the_next_where_they_overlap()
+    {
+        var project = Edit().ChangeClip(1, Edit().Clips[1] with { Crossfade = TimeSpan.FromSeconds(0.75) });
+
+        var arguments = EditArguments(project);
+
+        Assert.Equal("[v0][v1]xfade=transition=fade:duration=0.75:offset=1.75[j1]", Filters(arguments)[2]);
+        Assert.Equal("3.75", arguments[arguments.IndexOf("-t", arguments.IndexOf("-filter_complex")) + 1]);
+    }
+
+    [Fact]
+    public void Words_go_over_the_top_only_while_they_show_and_never_past_the_end()
+    {
+        var project = Edit()
+            .AddText(new EditText("Hello", TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2)))
+            .AddText(new EditText("Bye", TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(3)));
+
+        var arguments = EditArguments(project, new EditWork("work", ["hello.png", "bye.png"]));
+        var filters = Filters(arguments);
+
+        Assert.Equal(["-loop", "1", "-framerate", "30", "-t", "3", "-i", "hello.png"], arguments.Skip(arguments.IndexOf("-loop")).Take(8));
+        Assert.Equal(["-loop", "1", "-framerate", "30", "-t", "4.5", "-i", "bye.png"], arguments.Skip(arguments.LastIndexOf("-loop")).Take(8));
+        Assert.Equal("[j1][2:v:0]overlay=0:0:eof_action=pass:enable='between(t,1,3)',format=yuv420p[t0]", filters[3]);
+        Assert.Equal("[t0][3:v:0]overlay=0:0:eof_action=pass:enable='between(t,4,4.5)',format=yuv420p[t1]", filters[4]);
+        Assert.Equal("[t1]", arguments[arguments.IndexOf("-map") + 1]);
+        Assert.Equal("4:a:0", arguments[arguments.LastIndexOf("-map") + 1]);
+    }
+
+    [Fact]
+    public void A_stretch_of_sound_is_read_out_as_the_mixer_wants_it()
+    {
+        var piece = new SoundPiece(@"C:\Music\song.mp3", TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(20.5), TimeSpan.Zero, _ => 1);
+
+        var arguments = FfmpegVideoEncoder.ArgumentsFor(piece, "piece.wav").ToList();
+
+        Assert.Equal(["-ss", "12", "-t", "8.5", "-i", @"C:\Music\song.mp3"], arguments.Skip(arguments.IndexOf("-ss")).Take(6));
+        Assert.Equal(["-map", "0:a:0", "-vn", "-ac", "2", "-ar", "48000", "-c:a", "pcm_s16le", "-f", "wav", "piece.wav"], arguments.Skip(arguments.IndexOf("-map")));
+    }
+
+    [Fact]
+    public async Task Saving_an_edit_reads_the_sound_of_videos_that_have_some_mixes_it_and_runs_once_with_progress()
+    {
+        var piece = Path.Combine(_folder, "piece.wav");
+        using (var file = File.Create(piece))
+        {
+            SoundMixer.WriteHeader(file, SoundMixer.Rate);
+            file.Write(new byte[SoundMixer.Rate * 4]);
+        }
+
         var script = Script("""
             if "%3"=="-i" goto probe
-            echo %* > "%~dp0render.txt"
+            set all=%*
+            :next
+            set last=%~1
+            shift /1
+            if not "%~1"=="" goto next
+            if /i "%last:~-4%"==".wav" (
+              copy /y "%~dp0piece.wav" "%last%" > nul
+              echo %last%>> "%~dp0pieces.txt"
+              exit /b 0
+            )
+            echo %all% > "%~dp0render.txt"
             echo out_time_us=2250000
             echo out_time_us=4500000
             exit /b 0
@@ -154,13 +235,14 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
             exit /b 1
             """);
         var seen = new List<double>();
+        var work = new EditWork(Path.Combine(_folder, "work"), []);
 
-        await new FfmpegVideoEncoder(script).RenderAsync(Edit(), "out.mp4", Size with { Duration = TimeSpan.FromSeconds(4.5) }, new Reporter(seen));
+        await new FfmpegVideoEncoder(script).RenderAsync(Edit(), work, "out.mp4", Size with { Duration = TimeSpan.FromSeconds(4.5) }, new Reporter(seen));
 
         Assert.Equal(2, File.ReadAllLines(Path.Combine(_folder, "probed.txt")).Length);
-        var render = File.ReadAllText(Path.Combine(_folder, "render.txt"));
-        Assert.Contains("anullsrc", render);
-        Assert.Contains("[0:a:0]aformat", render);
+        Assert.Single(File.ReadAllLines(Path.Combine(_folder, "pieces.txt")));
+        Assert.True(File.Exists(Path.Combine(work.Folder, "sound.wav")));
+        Assert.Contains(Path.Combine(work.Folder, "sound.wav"), File.ReadAllText(Path.Combine(_folder, "render.txt")));
         Assert.Equal([50d, 100d], seen);
     }
 
@@ -173,7 +255,7 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
             exit /b 1
             """);
 
-        var problem = await Assert.ThrowsAsync<EncodeException>(() => new FfmpegVideoEncoder(script).RenderAsync(Edit(), "out.mp4", Size));
+        var problem = await Assert.ThrowsAsync<EncodeException>(() => new FfmpegVideoEncoder(script).RenderAsync(Edit(), new EditWork(Path.Combine(_folder, "work"), []), "out.mp4", Size));
 
         Assert.Equal("FFmpeg couldn't save this edit: Invalid argument", problem.Message);
     }
@@ -337,7 +419,7 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
             .Insert(new EditClip(sound, TimeSpan.FromSeconds(3), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3)));
         var output = Path.Combine(_folder, "edit.mp4");
 
-        await new FfmpegVideoEncoder(program).RenderAsync(project, output, EncodePlan.ForEdit(Mp4MetadataReader.Read(sound), project.Length));
+        await new FfmpegVideoEncoder(program).RenderAsync(project, new EditWork(Path.Combine(_folder, "work"), []), output, EncodePlan.ForEdit(Mp4MetadataReader.Read(sound), project.Length));
 
         var read = Mp4MetadataReader.Read(output)!;
         Assert.Equal(640, read.DisplayWidth);
