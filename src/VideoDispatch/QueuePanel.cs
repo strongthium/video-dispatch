@@ -82,12 +82,13 @@ public sealed class QueuePanel : INotifyPropertyChanged
 
     public Task RemoveAsync(JobRow row) => Task.Run(() => _queue.Remove(row.Id));
 
-    private void Show(UploadJob job)
+    private void Show(UploadJob changed)
     {
-        // A job that's gone from the queue was removed.
-        if (_queue.Jobs.All(current => current.Id != job.Id))
+        // What the queue has now, not the copy that came with the change: changes from different threads can arrive in
+        // either order, and an older copy landing last would leave the row behind. A job that's gone was removed.
+        if (_queue.Jobs.FirstOrDefault(current => current.Id == changed.Id) is not { } job)
         {
-            if (_rows.Remove(job.Id, out var gone))
+            if (_rows.Remove(changed.Id, out var gone))
             {
                 Rows.Remove(gone);
                 Refresh();

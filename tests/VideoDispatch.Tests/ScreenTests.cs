@@ -908,11 +908,16 @@ public sealed class QueuePanelTests : IAsyncDisposable
     [Fact]
     public async Task Shows_jobs_as_they_change_and_goes_through_the_UI_thread()
     {
+        // One change at a time, as on the UI thread.
         var posted = 0;
+        var one = new Lock();
         var panel = new QueuePanel(_queue, action =>
         {
             Interlocked.Increment(ref posted);
-            action();
+            lock (one)
+            {
+                action();
+            }
         });
         _queue.Start();
         Assert.True(panel.IsEmpty);

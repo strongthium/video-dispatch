@@ -170,8 +170,16 @@ public sealed class WindowsEditTests : IDisposable
         var seen = new List<double>();
 
         await _encoder.RenderAsync(project, Work(), PathOf("edit.mp4"), EncodePlan.ForEdit(null, project.Length) with { Width = 640, Height = 360 }, new Reporter(seen));
-        Assert.NotEmpty(seen);
-        Assert.All(seen, percent => Assert.InRange(percent, 0, 100));
+
+        // Windows can still be passing on the last few as saving finishes.
+        double[] reported;
+        lock (seen)
+        {
+            reported = [.. seen];
+        }
+
+        Assert.NotEmpty(reported);
+        Assert.All(reported, percent => Assert.InRange(percent, 0, 100));
 
         using var stop = new CancellationTokenSource();
         await stop.CancelAsync();
