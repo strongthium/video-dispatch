@@ -24,5 +24,7 @@ public sealed partial class NewPostPage : UserControl
         }
     }
 
+    private void Edit_Click(object sender, RoutedEventArgs e) => Panel.RequestEdit();
+
     private async void Queue_Click(object sender, RoutedEventArgs e) => await Panel.QueueAsync();
 }

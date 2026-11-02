@@ -1,7 +1,10 @@
 using System.Net.Http;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using VideoDispatch.Core;
 using VideoDispatch.Core.Accounts;
 using VideoDispatch.Core.Accounts.Secrets;
+using VideoDispatch.Core.Editing;
 using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
@@ -15,6 +18,11 @@ using VideoDispatch.Editing;
 namespace VideoDispatch.App;
 
 /// <summary>Everything the screens work with, real or made up.</summary>
+/// <param name="Encoder">The engine to use now: FFmpeg if the user chose it, otherwise Windows' own tools.</param>
+/// <param name="Edit">Keeps the edit being worked on.</param>
+/// <param name="ReadLength">How long a video is, for one whose metadata can't be read.</param>
+/// <param name="ReadFrame">The picture in a video at a moment, at a height, or null.</param>
+/// <param name="VideoExists">Whether a video is still where it was.</param>
 public sealed record Services(
     AccountService Accounts,
     Func<Uri, CancellationToken, Task> OpenBrowser,
@@ -24,7 +32,12 @@ public sealed record Services(
     Func<string, VideoMetadata?> ReadMetadata,
     AppSettingsStore Settings,
     FfmpegManager Ffmpeg,
-    Func<string, CancellationToken, Task<FfmpegInfo>> InspectFfmpeg)
+    Func<string, CancellationToken, Task<FfmpegInfo>> InspectFfmpeg,
+    Func<IVideoEncoder> Encoder,
+    EditStore Edit,
+    Func<string, CancellationToken, Task<TimeSpan?>> ReadLength,
+    Func<string, TimeSpan, int, CancellationToken, Task<ImageSource?>> ReadFrame,
+    Func<string, bool> VideoExists)
 {
     public static Services CreateReal() =>
         Create(new WindowsCredentialStore(), AppFolders.ForThisUser, Browser.OpenSignInAsync, handler => handler);
@@ -76,6 +89,43 @@ public sealed record Services(
         downloads.DefaultRequestHeaders.UserAgent.ParseAdd($"video-dispatch/{Updater.RunningVersion.ToString(4)}");
         var ffmpeg = new FfmpegManager(settings, new FfmpegDownloader(downloads, folders.Ffmpeg), time);
 
-        return new Services(accounts, openBrowser, queue, presets, youTube, Mp4MetadataReader.Read, settings, ffmpeg, FfmpegVideoEncoder.InspectAsync);
+        return new Services(
+            accounts,
+            openBrowser,
+            queue,
+            presets,
+            youTube,
+            Mp4MetadataReader.Read,
+            settings,
+            ffmpeg,
+            FfmpegVideoEncoder.InspectAsync,
+            Encoder,
+            new EditStore(folders.Edit),
+            WindowsVideoReader.ReadLengthAsync,
+            ReadFrameAsync,
+            File.Exists);
+    }
+
+    private static async Task<ImageSource?> ReadFrameAsync(string path, TimeSpan at, int height, CancellationToken cancellationToken)
+    {
+        if (await WindowsVideoReader.ReadFrameAsync(path, at, height, cancellationToken) is not { } encoded)
+        {
+            return null;
+        }
+
+        try
+        {
+            var picture = new BitmapImage();
+            picture.BeginInit();
+            picture.CacheOption = BitmapCacheOption.OnLoad;
+            picture.StreamSource = new MemoryStream(encoded);
+            picture.EndInit();
+            picture.Freeze();
+            return picture;
+        }
+        catch (Exception exception) when (exception is NotSupportedException or FileFormatException)
+        {
+            return null;
+        }
     }
 }

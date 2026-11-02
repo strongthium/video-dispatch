@@ -1,6 +1,8 @@
 using System.Runtime.InteropServices;
+using VideoDispatch.Core.Editing;
 using VideoDispatch.Core.Reencoding;
 using Windows.Foundation;
+using Windows.Media.Editing;
 using Windows.Media.MediaProperties;
 using Windows.Media.Transcoding;
 using Windows.Storage;
@@ -11,6 +13,9 @@ namespace VideoDispatch.Editing;
 public sealed class WindowsVideoEncoder : IVideoEncoder
 {
     private const string TryFfmpeg = "Windows' tools couldn't re-encode this video";
+
+    // CODECAPI_AVEncMPVGOPSize: how many frames there may be between key frames.
+    private static readonly Guid KeyFrameInterval = new("95f31b26-95a4-41aa-9303-246a7fc6eef1");
 
     static WindowsVideoEncoder() => WinRtLibrary.Install();
 
@@ -35,6 +40,61 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
         catch (Exception exception) when (exception is COMException or UnauthorizedAccessException or FileNotFoundException or ArgumentException)
         {
             throw new EncodeException($"{TryFfmpeg} (0x{exception.HResult:X8}). Its format may not be one Windows reads. Choose FFmpeg under Settings to try that instead, or send the file as it is.", exception);
+        }
+    }
+
+    /// <summary>
+    /// A key frame at least every <paramref name="seconds"/>. Left to itself, Windows' encoder can go many seconds
+    /// without one on calm footage, and players then land well away from where they're asked to jump to.
+    /// </summary>
+    public static void AskForKeyFrames(MediaEncodingProfile profile, double seconds)
+    {
+        var frames = profile.Video.FrameRate.Denominator > 0 ? (double)profile.Video.FrameRate.Numerator / profile.Video.FrameRate.Denominator : 30;
+        profile.Video.Properties[KeyFrameInterval] = (uint)Math.Max(1, Math.Round(frames * seconds));
+    }
+
+    public async Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var composition = new MediaComposition();
+            foreach (var clip in project.Clips)
+            {
+                var source = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(clip.SourcePath)).AsTask(cancellationToken);
+                var media = await MediaClip.CreateFromFileAsync(source).AsTask(cancellationToken);
+                var fromEnd = media.OriginalDuration - clip.End;
+                media.TrimTimeFromStart = clip.Start;
+                media.TrimTimeFromEnd = fromEnd > TimeSpan.Zero ? fromEnd : TimeSpan.Zero;
+                composition.Clips.Add(media);
+            }
+
+            await File.WriteAllBytesAsync(output, [], cancellationToken);
+            var target = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(output)).AsTask(cancellationToken);
+
+            // A clip of another shape is fitted inside this size, with black bars.
+            var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
+            profile.Video.Bitrate = (uint)plan.VideoBitrate;
+            profile.Audio.Bitrate = (uint)plan.AudioBitrate;
+            profile.Video.Width = (uint)(plan.Width ?? 1920);
+            profile.Video.Height = (uint)(plan.Height ?? 1080);
+            profile.Video.FrameRate.Numerator = (uint)Math.Round((plan.FramesPerSecond ?? 30) * 1000);
+            profile.Video.FrameRate.Denominator = 1000;
+            AskForKeyFrames(profile, 2);
+
+            var result = await composition.RenderToFileAsync(target, MediaTrimmingPreference.Precise, profile)
+                .AsTask(cancellationToken, progress ?? new Progress<double>());
+            if (result != TranscodeFailureReason.None)
+            {
+                throw new EncodeException($"Windows' tools couldn't save this edit ({result}). One of its videos may be in a format Windows doesn't read. Choose FFmpeg under Settings to try that instead.");
+            }
+        }
+        catch (COMException exception) when (exception.HResult == unchecked((int)0x80040154))
+        {
+            throw new EncodeException("This edition of Windows doesn't have the media tools. Install its Media Feature Pack, or choose FFmpeg under Settings.", exception);
+        }
+        catch (Exception exception) when (exception is COMException or UnauthorizedAccessException or FileNotFoundException or ArgumentException)
+        {
+            throw new EncodeException($"Windows' tools couldn't save this edit (0x{exception.HResult:X8}). One of its videos may be missing, or in a format Windows doesn't read. Choose FFmpeg under Settings to try that instead.", exception);
         }
     }
 
@@ -69,6 +129,8 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
             profile.Video.FrameRate.Numerator = own.Video.FrameRate.Numerator;
             profile.Video.FrameRate.Denominator = own.Video.FrameRate.Denominator;
         }
+
+        AskForKeyFrames(profile, 2);
 
         var transcoder = new MediaTranscoder { HardwareAccelerationEnabled = useHardware };
         var prepared = await transcoder.PrepareFileTranscodeAsync(source, target, profile).AsTask(cancellationToken);

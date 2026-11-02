@@ -77,6 +77,9 @@ public sealed class NewPostPanel : INotifyPropertyChanged
 
     public event PropertyChangedEventHandler? PropertyChanged;
 
+    /// <summary>Asks for the chosen video to be opened in the editor.</summary>
+    public event Action<string>? EditRequested;
+
     public bool HasVideo => _path is not null;
 
     public string FileName => _path is null ? "No video chosen" : Path.GetFileName(_path);
@@ -359,6 +362,14 @@ public sealed class NewPostPanel : INotifyPropertyChanged
         }
 
         Recheck();
+    }
+
+    public void RequestEdit()
+    {
+        if (_path is { } path)
+        {
+            EditRequested?.Invoke(path);
+        }
     }
 
     public async Task QueueAsync()

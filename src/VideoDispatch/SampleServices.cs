@@ -3,8 +3,12 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Web;
+using System.Windows;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using VideoDispatch.Core.Accounts;
 using VideoDispatch.Core.Accounts.Secrets;
+using VideoDispatch.Core.Editing;
 using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Presets;
@@ -71,6 +75,15 @@ public static class SampleServices
             ]));
 
         var settings = new AppSettingsStore(null);
+        var length = SampleVideo.Duration!.Value;
+        var edit = new EditProject(
+        [
+            new EditClip(@"C:\Videos\lake-morning.mp4", length, TimeSpan.FromSeconds(4), TimeSpan.FromSeconds(16.5)),
+            new EditClip(@"C:\Videos\ridge-walk.mp4", length, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(9)),
+            new EditClip(@"C:\Videos\ridge-walk.mp4", length, TimeSpan.FromSeconds(21), TimeSpan.FromSeconds(30.4)),
+            new EditClip(@"C:\Videos\summit.mp4", length, TimeSpan.Zero, TimeSpan.FromSeconds(11.2)),
+        ]);
+
         return new Services(
             accounts,
             platforms.ApproveAsync,
@@ -80,7 +93,57 @@ public static class SampleServices
             _ => SampleVideo,
             settings,
             new FfmpegManager(settings, new SampleFfmpegDownloads(), TimeProvider.System),
-            (_, _) => Task.FromResult(new FfmpegInfo("ffmpeg, in the sample", true)));
+            (_, _) => Task.FromResult(new FfmpegInfo("ffmpeg, in the sample", true)),
+            () => new SampleEncoder(),
+            new EditStore(null, edit),
+            (_, _) => Task.FromResult<TimeSpan?>(length),
+            (path, at, height, _) => Task.FromResult<ImageSource?>(SampleFrame(path, at, height)),
+            _ => true);
+    }
+
+    /// <summary>A made-up view for each sample video: sky over hills, which drift along as the video goes on.</summary>
+    private static ImageSource SampleFrame(string path, TimeSpan at, int height)
+    {
+        var (sky, ground) = Path.GetFileNameWithoutExtension(path) switch
+        {
+            "lake-morning" => (Color.FromRgb(0xF2, 0xB8, 0x80), Color.FromRgb(0x2E, 0x5E, 0x8C)),
+            "ridge-walk" => (Color.FromRgb(0xE0, 0x7A, 0x5F), Color.FromRgb(0x3D, 0x40, 0x5B)),
+            _ => (Color.FromRgb(0xA8, 0xDA, 0xDC), Color.FromRgb(0x45, 0x7B, 0x9D)),
+        };
+
+        var width = Math.Max(1, height * 9 / 16);
+        var drift = at.TotalSeconds / SampleVideo.Duration!.Value.TotalSeconds * width;
+        var visual = new DrawingVisual();
+        using (var draw = visual.RenderOpen())
+        {
+            draw.DrawRectangle(new LinearGradientBrush(sky, Color.FromRgb(0xFA, 0xF3, 0xE0), 90), null, new Rect(0, 0, width, height));
+            draw.DrawEllipse(new SolidColorBrush(Color.FromRgb(0xFF, 0xF4, 0xD6)), null, new Point((width * 0.7) - (drift * 0.2), height * 0.3), height * 0.05, height * 0.05);
+            draw.DrawEllipse(new SolidColorBrush(ground), null, new Point((width * 0.2) - drift, height * 0.95), width * 0.9, height * 0.35);
+            draw.DrawEllipse(new SolidColorBrush(Color.FromArgb(0xCC, ground.R, ground.G, ground.B)), null, new Point((width * 1.1) - drift, height * 1.05), width * 0.8, height * 0.4);
+        }
+
+        var picture = new RenderTargetBitmap(width, height, 96, 96, PixelFormats.Pbgra32);
+        picture.Render(visual);
+        picture.Freeze();
+        return picture;
+    }
+
+    /// <summary>Takes about as long as saving a short edit might, and saves nothing.</summary>
+    private sealed class SampleEncoder : IVideoEncoder
+    {
+        public Task EncodeAsync(string input, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default) =>
+            Task.CompletedTask;
+
+        public async Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+        {
+            for (var percent = 0; percent < 100; percent += 2)
+            {
+                progress?.Report(percent);
+                await Task.Delay(100, cancellationToken);
+            }
+
+            throw new EncodeException("In the sample, nothing is really saved.");
+        }
     }
 
     private static IEnumerable<UploadJob> SampleJobs()

@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Globalization;
+using System.Text;
 using System.Text.RegularExpressions;
+using VideoDispatch.Core.Editing;
 
 namespace VideoDispatch.Core.Reencoding;
 
@@ -35,7 +37,97 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
     public static IReadOnlyList<string> ArgumentsFor(string input, string output, EncodePlan plan)
     {
         // Errors only, because the first one says why, and what FFmpeg says last is just "Conversion failed!".
-        var arguments = new List<string> { "-hide_banner", "-v", "error", "-nostdin", "-y", "-i", input, "-map_metadata", "-1", "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p" };
+        var arguments = new List<string> { "-hide_banner", "-v", "error", "-nostdin", "-y", "-i", input };
+
+        // FFmpeg applies a phone's rotation first, so this is the size viewers see. It's the shape as shown, so the pixels
+        // are square. H.264 refuses an odd size, so one that couldn't be read is still made even.
+        arguments.AddRange(["-vf", plan is { Width: { } width, Height: { } height }
+            ? string.Create(CultureInfo.InvariantCulture, $"scale={width}:{height},setsar=1")
+            : "scale=trunc(iw/2)*2:trunc(ih/2)*2"]);
+
+        AddOutput(arguments, output, plan);
+        return arguments;
+    }
+
+    /// <summary>
+    /// The arguments for an edit. Each clip is read from its own part of its video, fitted inside the plan's size with
+    /// black bars if its shape differs, and made exactly as long as it should be, so picture and sound stay together
+    /// across the joins. A clip from a video with no sound gets silence, since every clip needs both to be joined.
+    /// </summary>
+    /// <param name="hasSound">Whether a video has a sound track.</param>
+    public static IReadOnlyList<string> ArgumentsFor(EditProject project, string output, EncodePlan plan, Func<string, bool> hasSound)
+    {
+        var arguments = new List<string> { "-hide_banner", "-v", "error", "-nostdin", "-y" };
+        var width = plan.Width ?? 1920;
+        var height = plan.Height ?? 1080;
+        var frames = Number(plan.FramesPerSecond ?? 30);
+        var filters = new List<string>();
+        var joins = new StringBuilder();
+        var input = 0;
+
+        for (var index = 0; index < project.Clips.Count; index++)
+        {
+            var clip = project.Clips[index];
+            var length = Number(clip.Length.TotalSeconds);
+            arguments.AddRange(["-ss", Number(clip.Start.TotalSeconds), "-t", length, "-i", clip.SourcePath]);
+            var picture = input++;
+
+            var sound = $"[{picture}:a:0]";
+            if (!hasSound(clip.SourcePath))
+            {
+                arguments.AddRange(["-f", "lavfi", "-t", length, "-i", "anullsrc=r=48000:cl=stereo"]);
+                sound = $"[{input++}:a:0]";
+            }
+
+            filters.Add(string.Create(CultureInfo.InvariantCulture,
+                $"[{picture}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={frames},format=yuv420p,tpad=stop_mode=clone:stop_duration={length},trim=duration={length},setpts=PTS-STARTPTS[v{index}]"));
+            filters.Add($"{sound}aformat=sample_rates=48000:channel_layouts=stereo,apad,atrim=duration={length},asetpts=PTS-STARTPTS[a{index}]");
+            joins.Append(CultureInfo.InvariantCulture, $"[v{index}][a{index}]");
+        }
+
+        filters.Add(string.Create(CultureInfo.InvariantCulture, $"{joins}concat=n={project.Clips.Count}:v=1:a=1[v][a]"));
+        arguments.AddRange(["-filter_complex", string.Join(";", filters), "-map", "[v]", "-map", "[a]"]);
+        AddOutput(arguments, output, plan);
+        return arguments;
+    }
+
+    public async Task EncodeAsync(string input, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+    {
+        await RunAsync(ArgumentsFor(input, output, plan), plan.Duration, progress, "FFmpeg couldn't re-encode this video", cancellationToken);
+    }
+
+    public async Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+    {
+        var withSound = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in project.Sources)
+        {
+            if (await HasSoundAsync(source, cancellationToken))
+            {
+                withSound.Add(source);
+            }
+        }
+
+        await RunAsync(ArgumentsFor(project, output, plan, withSound.Contains), plan.Duration, progress, "FFmpeg couldn't save this edit", cancellationToken);
+    }
+
+    /// <summary>Asked of FFmpeg, which lists a video's streams when given nothing to do with it.</summary>
+    private async Task<bool> HasSoundAsync(string path, CancellationToken cancellationToken)
+    {
+        using var process = Start(program, ["-hide_banner", "-nostdin", "-i", path]);
+        using var stop = cancellationToken.Register(() => TryKill(process));
+
+        var output = process.StandardOutput.ReadToEndAsync(CancellationToken.None);
+        var text = await process.StandardError.ReadToEndAsync(CancellationToken.None);
+        await output;
+        await process.WaitForExitAsync(CancellationToken.None);
+        cancellationToken.ThrowIfCancellationRequested();
+        return SoundStreamPattern().IsMatch(text);
+    }
+
+    private static void AddOutput(List<string> arguments, string output, EncodePlan plan)
+    {
+        // A key frame at least every two seconds, so players can jump about in the new file.
+        arguments.AddRange(["-map_metadata", "-1", "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p", "-force_key_frames", "expr:gte(t,n_forced*2)"]);
 
         if (plan.ConstantQuality is { } quality)
         {
@@ -47,26 +139,19 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
             arguments.AddRange(["-b:v", Bits(plan.VideoBitrate), "-maxrate", Bits(plan.VideoBitrate * 3 / 2), "-bufsize", Bits(plan.VideoBitrate * 3)]);
         }
 
-        // FFmpeg applies a phone's rotation first, so this is the size viewers see. It's the shape as shown, so the pixels
-        // are square. H.264 refuses an odd size, so one that couldn't be read is still made even.
-        arguments.AddRange(["-vf", plan is { Width: { } width, Height: { } height }
-            ? string.Create(CultureInfo.InvariantCulture, $"scale={width}:{height},setsar=1")
-            : "scale=trunc(iw/2)*2:trunc(ih/2)*2"]);
-
         arguments.AddRange(["-c:a", "aac", "-b:a", Bits(plan.AudioBitrate), "-movflags", "+faststart", "-progress", "pipe:1", "-nostats", output]);
-        return arguments;
     }
 
-    public async Task EncodeAsync(string input, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default)
+    private async Task RunAsync(IReadOnlyList<string> arguments, TimeSpan? length, IProgress<double>? progress, string failure, CancellationToken cancellationToken)
     {
-        using var process = Start(program, ArgumentsFor(input, output, plan));
+        using var process = Start(program, arguments);
 
         var errors = process.StandardError.ReadToEndAsync(CancellationToken.None);
         using var stop = cancellationToken.Register(() => TryKill(process));
 
         while (await process.StandardOutput.ReadLineAsync(CancellationToken.None) is { } line)
         {
-            if (plan.Duration is { TotalMicroseconds: > 0 } duration &&
+            if (length is { TotalMicroseconds: > 0 } duration &&
                 line.StartsWith("out_time_us=", StringComparison.Ordinal) &&
                 long.TryParse(line.AsSpan("out_time_us=".Length), NumberStyles.Integer, CultureInfo.InvariantCulture, out var done))
             {
@@ -82,11 +167,13 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
             var text = await errors;
             throw new EncodeException(text.Contains("libx264", StringComparison.Ordinal) && text.Contains("Unknown encoder", StringComparison.OrdinalIgnoreCase)
                 ? "This FFmpeg has no H.264 encoder (libx264). Choose a build that has one under Settings."
-                : $"FFmpeg couldn't re-encode this video: {FirstErrorIn(text)}");
+                : $"{failure}: {FirstErrorIn(text)}");
         }
     }
 
     private static string Bits(long bitsPerSecond) => bitsPerSecond.ToString(CultureInfo.InvariantCulture);
+
+    private static string Number(double value) => value.ToString("0.######", CultureInfo.InvariantCulture);
 
     /// <summary>The first line, without the <c>[libx264 @ 000001A2]</c> that says which part of FFmpeg is talking.</summary>
     private static string FirstErrorIn(string text)
@@ -147,4 +234,7 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
 
     [GeneratedRegex(@"\A(\[[^\]]* @ [^\]]*\]\s*)+")]
     private static partial Regex SpeakerPattern();
+
+    [GeneratedRegex(@"^\s*Stream #\d+:\d+.*: Audio:", RegexOptions.Multiline)]
+    private static partial Regex SoundStreamPattern();
 }

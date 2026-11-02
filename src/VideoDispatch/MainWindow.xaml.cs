@@ -9,6 +9,7 @@ public sealed partial class MainWindow : Window
 {
     private readonly Services _services;
     private readonly NewPostPanel _newPost;
+    private readonly EditPanel _edit;
     private readonly QueuePanel _queue;
     private readonly PresetsPanel _presets;
     private readonly YouTubeChoices _choices;
@@ -27,7 +28,20 @@ public sealed partial class MainWindow : Window
         _services = services;
         _choices = new YouTubeChoices(services.YouTube, services.Accounts.GetStatus);
         _newPost = new NewPostPanel(services.Queue, services.Presets, _choices, services.Accounts.GetStatus, services.ReadMetadata, TimeProvider.System, TimeZoneInfo.Local);
+        _edit = new EditPanel(services.Edit, services.ReadMetadata, services.ReadLength, services.Encoder, services.VideoExists);
         _presets = new PresetsPanel(services.Presets, _choices, DateOnly.FromDateTime(DateTime.Today));
+
+        // New post's video can be taken to the editor, and a saved edit brought back to post.
+        _newPost.EditRequested += async video =>
+        {
+            await _edit.StartWithAsync(video);
+            EditPlace.IsChecked = true;
+        };
+        _edit.UseVideo += async video =>
+        {
+            await _newPost.ChooseVideoAsync(video);
+            NewPlace.IsChecked = true;
+        };
         _accounts =
         [
             new AccountPanel(services.Accounts, Platform.TikTok, services.OpenBrowser),
@@ -64,6 +78,7 @@ public sealed partial class MainWindow : Window
                 await services.Ffmpeg.RunChecksAsync(_stopChecks.Token);
             });
 
+            await _edit.LoadAsync();
             await services.Presets.LoadAsync();
             await Task.WhenAll(_accounts.Select(account => account.LoadAsync()));
             await _newPost.RefreshAsync();
@@ -75,6 +90,7 @@ public sealed partial class MainWindow : Window
 
         (Program.StartPage switch
         {
+            "edit" => EditPlace,
             "queue" => QueuePlace,
             "presets" => PresetsPlace,
             "accounts" => AccountsPlace,
@@ -106,6 +122,7 @@ public sealed partial class MainWindow : Window
         {
             page = place switch
             {
+                "edit" => new EditPage(_services.ReadFrame) { DataContext = _edit },
                 "queue" => new QueuePage { DataContext = _queue },
                 "presets" => new PresetsPage { DataContext = _presets },
                 "accounts" => new AccountsPage(_accounts),

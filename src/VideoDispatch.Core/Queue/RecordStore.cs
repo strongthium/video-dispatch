@@ -135,6 +135,9 @@ public sealed record AppFolders(string Root)
 
     public string Settings => Path.Combine(Root, "settings.json");
 
+    /// <summary>The edit being worked on: which parts of which videos, never the videos themselves.</summary>
+    public string Edit => Path.Combine(Root, "edit.json");
+
     /// <summary>FFmpeg, if the user asked this app to download it.</summary>
     public string Ffmpeg => Path.Combine(Root, "ffmpeg");
 }

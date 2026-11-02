@@ -53,12 +53,45 @@ internal static class TestVideos
         return file.Path;
     }
 
+    /// <summary>A second of each colour in turn, so a picture says which second of the video it came from.</summary>
+    public static async Task<string> MakeSecondsAsync(string folderPath, string name, int width, int height, bool withSound, params Color[] colours)
+    {
+        var folder = await StorageFolder.GetFolderFromPathAsync(folderPath);
+        var composition = new MediaComposition();
+        foreach (var colour in colours)
+        {
+            composition.Clips.Add(MediaClip.CreateFromColor(colour, TimeSpan.FromSeconds(1)));
+        }
+
+        if (withSound)
+        {
+            composition.BackgroundAudioTracks.Add(await BackgroundAudioTrack.CreateFromFileAsync(await MakeToneAsync(folderPath, colours.Length)));
+        }
+
+        var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD720p);
+        profile.Video.Width = (uint)width;
+        profile.Video.Height = (uint)height;
+
+        // Unchanging colour gives the encoder no reason for key frames, and without them Windows lands a second or
+        // more away from where it was asked to look.
+        WindowsVideoEncoder.AskForKeyFrames(profile, 1);
+
+        var file = await folder.CreateFileAsync(name, CreationCollisionOption.ReplaceExisting);
+        var result = await composition.RenderToFileAsync(file, MediaTrimmingPreference.Precise, profile);
+        if (result != TranscodeFailureReason.None)
+        {
+            Assert.Skip($"Windows' media tools couldn't make a test video here: {result}.");
+        }
+
+        return file.Path;
+    }
+
     /// <summary>Exactly as long as the video, because a longer audio layer makes a file that misreports its length.</summary>
-    private static async Task<StorageFile> MakeToneAsync(string folderPath)
+    private static async Task<StorageFile> MakeToneAsync(string folderPath, int seconds = 2)
     {
         const int Rate = 44100;
-        var path = Path.Combine(folderPath, "tone.wav");
-        var samples = Rate * 2;
+        var path = Path.Combine(folderPath, $"tone-{seconds}.wav");
+        var samples = Rate * seconds;
 
         using (var writer = new BinaryWriter(File.Create(path)))
         {
@@ -192,7 +225,7 @@ public sealed class WindowsVideoEncoderTests : IDisposable
     }
 
     /// <summary>Writes the rotation into the track's header, in place, as a phone would have.</summary>
-    private static void MarkRotatedClockwise(string path)
+    internal static void MarkRotatedClockwise(string path)
     {
         var bytes = File.ReadAllBytes(path);
         var matrix = new[] { 0, 1 << 16, 0, -1 << 16, 0, 0, 0, 0, 0x40000000 };
@@ -225,18 +258,18 @@ public sealed class WindowsVideoEncoderTests : IDisposable
         throw new InvalidOperationException("No video track header was found.");
     }
 
-    private static async Task<int> AudioTracksInAsync(string path)
+    internal static async Task<int> AudioTracksInAsync(string path)
     {
         var clip = await MediaClip.CreateFromFileAsync(await StorageFile.GetFileFromPathAsync(path));
         return clip.EmbeddedAudioTracks.Count;
     }
 
-    private static async Task<Frame> ReadFrameAsync(string path)
+    internal static async Task<Frame> ReadFrameAsync(string path, double seconds = 1)
     {
         var composition = new MediaComposition();
         composition.Clips.Add(await MediaClip.CreateFromFileAsync(await StorageFile.GetFileFromPathAsync(path)));
 
-        using var stream = await composition.GetThumbnailAsync(TimeSpan.FromSeconds(1), 0, 0, VideoFramePrecision.NearestFrame);
+        using var stream = await composition.GetThumbnailAsync(TimeSpan.FromSeconds(seconds), 0, 0, VideoFramePrecision.NearestFrame);
         var decoder = await BitmapDecoder.CreateAsync(stream);
         var pixels = await decoder.GetPixelDataAsync(
             BitmapPixelFormat.Bgra8,
@@ -248,7 +281,7 @@ public sealed class WindowsVideoEncoderTests : IDisposable
         return new Frame((int)decoder.PixelWidth, (int)decoder.PixelHeight, pixels.DetachPixelData());
     }
 
-    private static async Task SkipWithoutMediaToolsAsync()
+    internal static async Task SkipWithoutMediaToolsAsync()
     {
         try
         {
@@ -270,12 +303,31 @@ public sealed class WindowsVideoEncoderTests : IDisposable
         return await TestVideos.MakeAsync(_folder, name, width, height, framesPerSecond);
     }
 
-    private sealed record Frame(int Width, int Height, byte[] Pixels)
+    internal sealed record Frame(int Width, int Height, byte[] Pixels)
     {
+        public string ColourInTheMiddle => ColourAt(Width / 2, Height / 2);
+
         public bool IsRed(int x, int y)
         {
             var at = ((y * Width) + x) * 4;
             return Pixels[at + 2] > 128 && Pixels[at] < 128;
+        }
+
+        /// <summary>The colour at a point, by name.</summary>
+        public string ColourAt(int x, int y)
+        {
+            var at = ((y * Width) + x) * 4;
+            return (Pixels[at + 2] > 128, Pixels[at + 1] > 128, Pixels[at] > 128) switch
+            {
+                (true, false, false) => "red",
+                (false, true, false) => "green",
+                (false, false, true) => "blue",
+                (true, true, false) => "yellow",
+                (true, false, true) => "magenta",
+                (false, false, false) => "black",
+                (true, true, true) => "white",
+                _ => "other",
+            };
         }
     }
 

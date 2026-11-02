@@ -126,6 +126,24 @@ public sealed record EncodePlan(
             metadata?.RotationDegrees is 90 or 270);
     }
 
+    /// <summary>
+    /// For saving an edit: the first clip's size and frame rate, at high quality, since the new file may well be
+    /// re-encoded again before it's sent. Clips of another shape are fitted inside, with black bars. A first clip whose
+    /// size can't be read makes a landscape 1080p video.
+    /// </summary>
+    public static EncodePlan ForEdit(VideoMetadata? first, TimeSpan length)
+    {
+        // With no source size to compare against, the quality setting alone decides the bitrate.
+        var plan = For(new EncodeSettings(EncodeGoal.HighQuality), first is null ? null : first with { Duration = length }, 0);
+        return plan with
+        {
+            Width = plan.Width ?? 1920,
+            Height = plan.Height ?? 1080,
+            Duration = length,
+            SourceIsSideways = false,
+        };
+    }
+
     /// <summary>About how big the file will be. An engine aiming at quality may come out quite different.</summary>
     public long? EstimatedBytes => Duration is { TotalSeconds: > 0 } duration
         ? (long)((VideoBitrate + AudioBitrate) * duration.TotalSeconds / 8)

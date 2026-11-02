@@ -11,7 +11,10 @@
       <Border Style="{StaticResource Card}" Margin="0,0,0,16">
         <StackPanel>
           <DockPanel>
-            <Button DockPanel.Dock="Right" Content="Choose video" Click="Choose_Click" VerticalAlignment="Top" Margin="16,0,0,0" Style="{DynamicResource AccentButtonStyle}" />
+            <Button DockPanel.Dock="Right" Content="Choose video" Click="Choose_Click" VerticalAlignment="Top" Margin="8,0,0,0" Style="{DynamicResource AccentButtonStyle}" />
+            <Button DockPanel.Dock="Right" Content="Edit" Click="Edit_Click" VerticalAlignment="Top" Margin="16,0,0,0" IsEnabled="{Binding HasVideo}"
+                    ToolTip="Cut and trim this video, or join others to it. It isn't changed: the edit is saved as a new video." />
+
             <StackPanel>
               <TextBlock Text="{Binding FileName}" Style="{StaticResource Heading}" TextTrimming="CharacterEllipsis" />
               <TextBlock Text="{Binding MetadataText}" Style="{StaticResource Muted}" Margin="0,2,0,0" />

@@ -1,3 +1,4 @@
+using VideoDispatch.Core.Editing;
 using VideoDispatch.Core.Media;
 using VideoDispatch.Core.Model;
 using VideoDispatch.Core.Reencoding;
@@ -275,5 +276,8 @@ public sealed class EncodeRenderStepTests : IDisposable
 
             File.WriteAllBytes(output, new byte[OutputSize]);
         }
+
+        public Task RenderAsync(EditProject project, string output, EncodePlan plan, IProgress<double>? progress = null, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("The queue never saves edits.");
     }
 }

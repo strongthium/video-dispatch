@@ -195,6 +195,19 @@ Tried on 2026-11-01 with FFmpeg 9.0.2 and Windows' tools, on made-up test pictur
 - **Windows' MP4s keep their index at the end,** and FFmpeg's at the front, as asked. It makes no difference to an upload.
 - **Odd file names are fine.** Accents, Japanese, `%`, `#`, `&` and brackets all went through, because arguments go straight to the program.
 
+## What editing really did
+
+Tried on 2026-11-02 with Windows' tools, on test videos where each second is its own colour, so a picture says which second it came from. Not camera footage, and not yet with FFmpeg.
+
+- **WPF's own player can't play a composition,** but it plays the source files, and seeks within them. So the preview plays the clips one after another from their own files, with a short pause, about 0.2 seconds here, where a clip comes from a different file.
+- **WPF's player, paused, sometimes keeps showing an earlier picture after a jump.** At 1280 x 720 every jump landed. At 640 x 360 most showed the picture from before. Playing, it was always right. So the paused preview is a single frame read with `MediaComposition.GetThumbnailAsync`, at about 0.4 seconds each.
+- **WPF's player ignores the mark a phone leaves to show its video turned,** and plays it sideways. The editor turns the player by the file's own rotation.
+- **Opened paused, WPF's player ignores a jump made straight after it opens,** and plays from the start. Opened playing, it takes the jump.
+- **`GetThumbnailsAsync`, for many frames at once, returned the first frame every time,** whatever times it was asked for. Asked one at a time, the same frames came back right.
+- **Windows' encoder can go seconds without a key frame on calm footage,** and every reader then lands up to a second away from where it was asked to look. `CODECAPI_AVEncMPVGOPSize` on the profile's video properties sets the most frames between key frames. With a key frame every second, every frame was read right. The app asks for one every two seconds in what it makes.
+- **A composition keeps cuts where they were asked for,** turns a sideways phone video upright, fits a clip of another shape inside the frame with black bars, and joins a clip without sound to one with it.
+- **Windows' frame rate is reported from the file,** and these short test files read as 31 fps rather than 30. A saved edit takes the first clip's figure.
+
 ## Sources
 
 - [TikTok inbox upload](https://developers.tiktok.com/doc/content-posting-api-reference-upload-video)
