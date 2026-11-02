@@ -28,7 +28,17 @@ jobs:
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
-      - run: dotnet test
+      # A run's log can only be read signed in, and its annotations by anyone, so the failures go there too.
+      - name: Test
+        shell: pwsh
+        run: |
+          dotnet test *>&1 | Tee-Object -FilePath test-log.txt
+          if ($LASTEXITCODE -ne 0) {
+            $failures = Select-String test-log.txt -Pattern '^failed ' -Context 0,12 | ForEach-Object { $_.Line; $_.Context.PostContext }
+            $message = ($failures -join "`n").Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
+            "::error title=Failed tests::$message"
+            exit 1
+          }
 
   build:
     name: Build win-x64, needs-dotnet
