@@ -4,6 +4,8 @@
 
 # video-dispatch
 
+[![Build and release](https://github.com/strongthium/video-dispatch/actions/workflows/release.yml/badge.svg?branch=deploy)](https://github.com/strongthium/video-dispatch/actions/workflows/release.yml)
+[![Latest release](https://img.shields.io/github/v/release/strongthium/video-dispatch?label=release)](https://github.com/strongthium/video-dispatch/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 `video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, fills in text from your own presets, and can compress or re-encode a video to MP4 before sending it. A video editor cuts, trims, joins, fades, zooms, slows down and speeds up clips, adds music and words over them, turns sound up or evens it out, and saves one new MP4.
@@ -140,7 +142,7 @@ Adding videos to playlists is off unless you ask for it, because the YouTube per
 
 ## Using it
 
-Take the `.exe` straight from [`public/`](public), which always holds the latest build: `video-dispatch-win-x64-needs-dotnet.exe`, about 7 MB, for Windows 10 (version 2004 or later) and 11 on x64 PCs. It runs on the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed on the PC, which Microsoft Update keeps patched. Without it, Windows offers to download it. There's no release to download yet.
+Download a zip from [Releases](../../releases/latest), or take the `.exe` straight from [`public/`](public), which always holds the latest build: `video-dispatch-win-x64-needs-dotnet.exe`, about 7 MB, for Windows 10 (version 2004 or later) and 11 on x64 PCs. It runs on the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed on the PC, which Microsoft Update keeps patched. Without it, Windows offers to download it.
 
 The program is small because it draws with what Windows and .NET already have: WPF, with Windows 11's own look (light or dark, in your accent colour). It adds no packages. About 6 MB of it is Microsoft's own library for reaching Windows' media tools, kept zipped inside the program and unpacked into memory only when a video is edited or re-encoded.
 
@@ -211,7 +213,7 @@ Everything has been tested against made-up platforms: 965 tests, including the w
 - Changing the speed of a video that isn't an MP4 or MOV with Windows' tools. That isn't possible, and it says to choose FFmpeg.
 - **Download FFmpeg** pressed in the real app. The same download code has fetched and run the real build from gyan.dev, but from a test program, not from that button.
 - An edition of Windows without the media tools, such as N editions. Re-encoding there should say to install the Media Feature Pack or choose FFmpeg.
-- An update from a real release, because there's no release yet. The check for one has run against GitHub, and the update itself against made-up downloads.
+- An update from one real release to the next, because there's only been one. The check for one has run against GitHub, and the update itself against made-up downloads.
 
 Details that only a real account can settle are in [`docs/platform-notes.md`](docs/platform-notes.md), which records what the code relies on from each platform's docs.
 
