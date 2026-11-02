@@ -23,21 +23,28 @@ jobs:
   test:
     name: Test
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: 10.0.x
-      # A run's log can only be read signed in, and its annotations by anyone, so the failures go there too.
+      # A run's log can only be read signed in, and its annotations by anyone, so the failures go there too. The tests
+      # take about two minutes, so after 15 they're stopped, and those that never finished are named.
       - name: Test
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Continue'
-          dotnet test *>&1 | Tee-Object -FilePath test-log.txt
+          dotnet test --timeout 15m --output detailed *>&1 | Tee-Object -FilePath test-log.txt
           if ($LASTEXITCODE -ne 0) {
             # Without its colours, and if no test is named as failed, the end of what it said.
-            $lines = @(Get-Content test-log.txt | ForEach-Object { $_ -replace '\x1b\[[0-9;?]*[A-Za-z]', '' })
-            $failures = for ($at = 0; $at -lt $lines.Count; $at++) { if ($lines[$at] -match '^\s*failed ') { $lines[$at..[Math]::Min($at + 12, $lines.Count - 1)] } }
+            $strip = { $_ -replace '\x1b\[[0-9;?]*[A-Za-z]', '' }
+            $lines = @(Get-Content test-log.txt | ForEach-Object $strip)
+            $failures = @(for ($at = 0; $at -lt $lines.Count; $at++) { if ($lines[$at] -match '^\s*failed ') { $lines[$at..[Math]::Min($at + 12, $lines.Count - 1)] } })
+            $done = @($lines | ForEach-Object { if ($_ -match '^\s*(passed|failed|skipped) ([^\s(]+)') { $Matches[2] } })
+            $all = @(dotnet test --no-build --list-tests 2>&1 | ForEach-Object $strip | ForEach-Object { if ($_ -match '^\s{2}([\w.]+)$') { $Matches[1] } })
+            $unfinished = @($all | Where-Object { $_ -notin $done } | Select-Object -Unique)
+            if ($unfinished) { $failures = @('Never finished:') + $unfinished + $failures }
             if (-not $failures) { $failures = $lines | Select-Object -Last 40 }
             $message = ($failures -join "`n").Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
             "::error title=Failed tests::$message"
