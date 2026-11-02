@@ -43,6 +43,7 @@ public sealed class EditPageTests : IDisposable
         await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
         var first = await TestVideos.MakeSecondsAsync(_folder, "first.mp4", 640, 360, true, WinColor.FromArgb(255, 255, 0, 0), WinColor.FromArgb(255, 0, 255, 0), WinColor.FromArgb(255, 0, 0, 255));
         var second = await TestVideos.MakeSecondsAsync(_folder, "second.mp4", 640, 360, true, WinColor.FromArgb(255, 255, 255, 0), WinColor.FromArgb(255, 255, 0, 255));
+        await SkipWithoutWpfPlayerAsync(first);
 
         // Green from the first, yellow from the second, then blue from the first again.
         var project = new EditProject(
@@ -92,6 +93,7 @@ public sealed class EditPageTests : IDisposable
         await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
         var phone = await TestVideos.MakeAsync(_folder, "phone.mp4", 640, 360);
         WindowsVideoEncoderTests.MarkRotatedClockwise(phone);
+        await SkipWithoutWpfPlayerAsync(phone);
         var project = new EditProject([EditClip.Whole(phone, Seconds(2))]);
 
         var (top, bottom, tall) = await OnWindowThreadAsync(async (page, panel) =>
@@ -129,8 +131,15 @@ public sealed class EditPageTests : IDisposable
 
         var (left, darkness, words) = await OnWindowThreadAsync(async (page, panel) =>
         {
+            // The first picture read can take a few seconds on a slow PC, so this waits for it rather than a set time.
             panel.Position = Seconds(0.5);
-            await Task.Delay(1500);
+            var still = (Image)page.FindName("Still");
+            for (var wait = 0; wait < 100 && still.Source is null; wait++)
+            {
+                await Task.Delay(100);
+            }
+
+            await Task.Delay(300);
             var pictures = (FrameworkElement)page.FindName("Pictures");
             var shown = ColourAt(Picture(pictures), 8, pictures.ActualHeight / 2);
             return (shown, ((FrameworkElement)page.FindName("Darken")).Opacity, ((Panel)page.FindName("Words")).Children.Count);
@@ -169,6 +178,38 @@ public sealed class EditPageTests : IDisposable
         var across = Enumerable.Range(0, 64).Select(step => during.ColourAt(during.Width * step / 64, during.Height / 2)).ToList();
         Assert.Contains("white", across);
         Assert.Contains("black", across);
+    }
+
+    /// <summary>
+    /// WPF's player is Windows Media Player's, which some PCs don't have even with the rest of the media tools, such as
+    /// Windows Server, where GitHub runs these tests. There the preview can't play, so tests of playing are skipped.
+    /// </summary>
+    private static async Task SkipWithoutWpfPlayerAsync(string path)
+    {
+        var opened = new TaskCompletionSource<string?>();
+        var player = await WindowThread.Value.InvokeAsync(() =>
+        {
+            var opening = new MediaPlayer();
+            opening.MediaOpened += (_, _) => opened.TrySetResult(null);
+            opening.MediaFailed += (_, failed) => opened.TrySetResult(failed.ErrorException?.Message ?? "it couldn't open a video");
+            try
+            {
+                opening.Open(new Uri(path));
+            }
+            catch (Exception exception)
+            {
+                opened.TrySetResult(exception.Message);
+            }
+
+            return opening;
+        });
+
+        var trouble = await opened.Task.WaitAsync(Seconds(15)).ContinueWith(open => open.IsCompletedSuccessfully ? open.Result : "it didn't open a video within 15 seconds");
+        await WindowThread.Value.InvokeAsync(player.Close);
+        if (trouble is not null)
+        {
+            Assert.Skip($"WPF's player can't play video here: {trouble}");
+        }
     }
 
     private static RenderTargetBitmap Picture(FrameworkElement element)
