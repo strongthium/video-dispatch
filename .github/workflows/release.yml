@@ -32,9 +32,13 @@ jobs:
       - name: Test
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
           dotnet test *>&1 | Tee-Object -FilePath test-log.txt
           if ($LASTEXITCODE -ne 0) {
-            $failures = Select-String test-log.txt -Pattern '^failed ' -Context 0,12 | ForEach-Object { $_.Line; $_.Context.PostContext }
+            # Without its colours, and if no test is named as failed, the end of what it said.
+            $lines = @(Get-Content test-log.txt | ForEach-Object { $_ -replace '\x1b\[[0-9;?]*[A-Za-z]', '' })
+            $failures = for ($at = 0; $at -lt $lines.Count; $at++) { if ($lines[$at] -match '^\s*failed ') { $lines[$at..[Math]::Min($at + 12, $lines.Count - 1)] } }
+            if (-not $failures) { $failures = $lines | Select-Object -Last 40 }
             $message = ($failures -join "`n").Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
             "::error title=Failed tests::$message"
             exit 1
