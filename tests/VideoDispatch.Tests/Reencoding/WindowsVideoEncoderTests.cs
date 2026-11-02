@@ -76,8 +76,23 @@ internal static class TestVideos
         // more away from where it was asked to look.
         WindowsVideoEncoder.AskForKeyFrames(profile, 1);
 
+        // Now and then, with other tests encoding at the same time, Windows throws here with no reason given, and the
+        // same render works when tried again.
         var file = await folder.CreateFileAsync(name, CreationCollisionOption.ReplaceExisting);
-        var result = await composition.RenderToFileAsync(file, MediaTrimmingPreference.Precise, profile);
+        TranscodeFailureReason result;
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                result = await composition.RenderToFileAsync(file, MediaTrimmingPreference.Precise, profile);
+                break;
+            }
+            catch (COMException) when (attempt < 3)
+            {
+                await Task.Delay(500);
+            }
+        }
+
         if (result != TranscodeFailureReason.None)
         {
             Assert.Skip($"Windows' media tools couldn't make a test video here: {result}.");

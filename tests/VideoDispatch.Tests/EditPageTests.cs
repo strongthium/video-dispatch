@@ -54,17 +54,18 @@ public sealed class EditPageTests : IDisposable
 
         var seen = await OnWindowThreadAsync(async (page, panel) =>
         {
+            // There are two players, one opening the next video while the other plays, so whichever is showing is looked at.
             var samples = new List<(double At, string Colour)>();
-            var player = (MediaElement)page.FindName("Player");
+            var players = new[] { (MediaElement)page.FindName("Player"), (MediaElement)page.FindName("Standby") };
             ((Button)page.FindName("PlayButton")).RaiseEvent(new RoutedEventArgs(ButtonBase.ClickEvent));
 
             var watch = System.Diagnostics.Stopwatch.StartNew();
             while (watch.Elapsed < Seconds(6))
             {
                 await Task.Delay(100);
-                if (player.Visibility == Visibility.Visible)
+                if (players.FirstOrDefault(player => player.Visibility == Visibility.Visible) is { } shown)
                 {
-                    samples.Add((panel.Position.TotalSeconds, ColourOf(player)));
+                    samples.Add((panel.Position.TotalSeconds, ColourOf(shown)));
                 }
             }
 
@@ -245,9 +246,7 @@ public sealed class EditPageTests : IDisposable
         {
             var panel = new EditPanel(new EditStore(null, project), Mp4MetadataReader.Read, (_, _) => Task.FromResult<TimeSpan?>(null), () => new WindowsVideoEncoder(), File.Exists);
             var page = new EditPage(async (path, at, height, cancel) =>
-                await WindowsVideoReader.ReadFrameAsync(path, at, height, cancel) is { } bytes
-                    ? BitmapFrame.Create(new MemoryStream(bytes), BitmapCreateOptions.None, BitmapCacheOption.OnLoad)
-                    : null)
+                await WindowsVideoReader.ReadFrameAsync(path, at, height, cancel) is { } read ? Services.ToImage(read) : null)
             {
                 DataContext = panel,
             };

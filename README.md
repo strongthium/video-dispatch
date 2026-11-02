@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
-`video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, fills in text from your own presets, and can compress or re-encode a video to MP4 before sending it. A video editor cuts, trims, joins, fades and zooms clips, adds music and words over them, and saves one new MP4.
+`video-dispatch` is a Windows desktop app for uploading video to TikTok and YouTube, including YouTube Shorts: choose one video, write what goes with it, and queue it to both. It keeps a queue that survives restarts, resumes interrupted YouTube uploads, schedules YouTube videos, fills in text from your own presets, and can compress or re-encode a video to MP4 before sending it. A video editor cuts, trims, joins, fades, zooms, slows down and speeds up clips, adds music and words over them, turns sound up or evens it out, and saves one new MP4.
 
 It runs on Windows 10 (version 2004 or later) and 11, is one file of about 7 MB with nothing to install, and has no server. You register your own TikTok and Google apps, and your videos go straight from your PC to them.
 
@@ -57,13 +57,25 @@ What can be set for each:
 
 | | |
 |---|---|
-| **A clip** | how loud its own sound is, a fade in from black and out to black (picture and sound together), a crossfade from the clip before, and zoom up to 400%. Drag the preview to choose what's in view when zoomed |
-| **A sound** | how loud it is, and how long it takes to fade in and out. Any part of it past the end of the edit isn't heard |
+| **A clip** | how loud its own sound is, up to 400%, and how it's evened out; its speed; a fade in from black and out to black (picture and sound together); a crossfade from the clip before; and zoom up to 400%. Drag the preview to choose what's in view when zoomed |
+| **A sound** | how loud it is, up to 400%, how it's evened out, and how long it takes to fade in and out. Any part of it past the end of the edit isn't heard |
 | **Words** | the words, top, middle or bottom, three sizes, white, yellow or black, with or without a box behind them, and how long they show |
+
+**Speed** runs from 25% to 400%, or type how long the clip should last under **Lasts**, such as `60` or `1:00`. A 30-second clip set to last a minute plays at 50%, each frame shown twice. Once you've changed a clip's speed, you're asked whether its sound should change with it. If yes, it stays in step with the picture, and sounds deeper when slowed and higher when sped up. If no, it plays at its own speed from the start of the clip, so it ends early when the clip is slowed and is cut off when it's sped up. The choice stays beside the speed, to change later.
+
+**Louder and quieter.** Volume goes from silent to four times as loud. Each clip's and sound's sound can also be evened out first:
+
+| | |
+|---|---|
+| **As recorded** | left as it is |
+| **As loud as it can be** | the whole of it turned up or down until its loudest moment is just under full. Nothing is made more than 20 times louder, so near-silence doesn't become hiss |
+| **Evened out, as for speech** | its loud parts turned down and then the whole of it turned up, so quiet and loud parts end up closer together |
+
+Whatever is turned up, the finished mix goes through a limiter. Sound louder than there's room for is held just under full instead of clipping into distortion.
 
 A crossfade plays the two clips at once, so it makes the edit that much shorter. The timeline shows it as a pale band, and fades as shaded corners.
 
-Paused, the preview is the exact frame from the video, in the shape the video is saved at, with zoom, fades, crossfades and words drawn as saving draws them. Playing, it uses Windows' own player, one clip after another, with a short pause where a clip comes from a different video. While playing, a crossfade shows the next clip's first picture fading in, rather than that clip moving. The edit is kept for next time, and holds only where the files are and which parts are used.
+Paused, the preview is the exact frame from the video, in the shape the video is saved at, with zoom, fades, crossfades and words drawn as saving draws them. Frames come from Windows' own player in about 20 ms each, so dragging the playhead keeps up. Playing, it plays the clips one after another at their speeds, and opens the next video a moment before a cut to it. While playing, a crossfade shows the next clip's first picture fading in, rather than that clip moving. The preview can't play sound louder than it was, or a clip's sound at its own speed while its picture plays at another, so those are only heard in the saved video. The edit is kept for next time, and holds only where the files are and which parts are used.
 
 **Save video** makes the new file where you choose, at the first clip's picture size and frame rate. A clip of another shape fits inside it, with black bars. The new file is high quality, since it may well be compressed again before it's sent. A key frame every two seconds lets players jump about in it. It can't be saved over one of the files in the edit. While it saves, a folder named after the new file holds the sound and pictures of words it's working from, and it's removed when it's done.
 
@@ -190,12 +202,13 @@ A Google project gets 100 video uploads a day through YouTube's API, and its quo
 
 ## What hasn't been tried
 
-Everything has been tested against made-up platforms: 924 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
+Everything has been tested against made-up platforms: 965 tests, including the whole flow from signing in to both platforms' uploads over real connections to [local servers](tests/VideoDispatch.Tests/EndToEnd/LocalPlatforms.cs) built from their docs. Those servers can only be as right as the docs. These haven't happened yet:
 
 - A real sign-in or upload on TikTok or YouTube, or an app approval from TikTok.
 - A real video from a phone, rotated, through **New post**. Reading video details has been tried on real files, but rotation only on hand-built ones.
 - Re-encoding real footage. Both engines have really encoded test videos, including sideways ones, and **Fit a size** stayed under its limit on all of them, but those are made-up pictures. So how real footage looks, and how long a long video takes, are still to be seen.
-- Editing real footage. Windows' tools have cut, joined, zoomed, faded and crossfaded test videos, put words on them and mixed sounds into them, including sideways and differently shaped ones, and the editor's own window has played them in order. Where each sound lands, and how loud it is, was measured, but nobody has listened to an edit. FFmpeg's way of saving an edit has only been checked as the command it builds, not run.
+- Editing real footage. Windows' tools have cut, joined, zoomed, faded, crossfaded, slowed down and sped up test videos, put words on them and mixed sounds into them, including sideways and differently shaped ones, and the editor's own window has played them in order. Where each sound lands, and how loud it is, was measured, but nobody has listened to an edit, so how a slowed sound or the evening out sounds is still to be heard. FFmpeg's way of saving an edit has only been checked as the command it builds, not run.
+- Changing the speed of a video that isn't an MP4 or MOV with Windows' tools. That isn't possible, and it says to choose FFmpeg.
 - **Download FFmpeg** pressed in the real app. The same download code has fetched and run the real build from gyan.dev, but from a test program, not from that button.
 - An edition of Windows without the media tools, such as N editions. Re-encoding there should say to install the Media Feature Pack or choose FFmpeg.
 - An update from a real release, because there's no release yet. The check for one has run against GitHub, and the update itself against made-up downloads.

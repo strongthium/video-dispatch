@@ -69,10 +69,13 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
         {
             var clip = project.Clips[index];
             var length = Number(clip.Length.TotalSeconds);
-            arguments.AddRange(["-ss", Number(clip.Start.TotalSeconds), "-t", length, "-i", clip.SourcePath]);
+            arguments.AddRange(["-ss", Number(clip.Start.TotalSeconds), "-t", Number(clip.Span.TotalSeconds), "-i", clip.SourcePath]);
 
+            // At another speed, each frame's time is stretched or squeezed, and the steady frame rate after it shows
+            // frames again or leaves some out.
+            var speed = clip.HasSpeed ? $"setpts=(PTS-STARTPTS)/{Number(clip.Speed)}," : "";
             var chain = new StringBuilder(string.Create(CultureInfo.InvariantCulture,
-                $"[{input++}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps={frames},format=yuv420p,tpad=stop_mode=clone:stop_duration={length},trim=duration={length},setpts=PTS-STARTPTS"));
+                $"[{input++}:v:0]scale={width}:{height}:force_original_aspect_ratio=decrease:force_divisible_by=2,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1,{speed}fps={frames},format=yuv420p,tpad=stop_mode=clone:stop_duration={length},trim=duration={length},setpts=PTS-STARTPTS"));
 
             if (clip.IsZoomed)
             {
@@ -135,7 +138,7 @@ public sealed partial class FfmpegVideoEncoder(string program) : IVideoEncoder
     public static IReadOnlyList<string> ArgumentsFor(SoundPiece piece, string output) =>
     [
         "-hide_banner", "-v", "error", "-nostdin", "-y",
-        "-ss", Number(piece.From.TotalSeconds), "-t", Number(piece.Length.TotalSeconds), "-i", piece.SourcePath,
+        "-ss", Number(piece.From.TotalSeconds), "-t", Number(piece.Span.TotalSeconds), "-i", piece.SourcePath,
         "-map", "0:a:0", "-vn", "-ac", "2", "-ar", SoundMixer.Rate.ToString(CultureInfo.InvariantCulture), "-c:a", "pcm_s16le", "-f", "wav", output,
     ];
 

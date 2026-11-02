@@ -36,6 +36,7 @@
                 </Grid>
                 <Grid x:Name="PlayerHost">
                   <MediaElement x:Name="Player" LoadedBehavior="Manual" UnloadedBehavior="Manual" ScrubbingEnabled="False" Stretch="Uniform" Visibility="Hidden" IsMuted="False" />
+                  <MediaElement x:Name="Standby" LoadedBehavior="Manual" UnloadedBehavior="Manual" ScrubbingEnabled="False" Stretch="Uniform" Visibility="Hidden" IsMuted="False" />
                 </Grid>
                 <Grid x:Name="OverHost">
                   <Image x:Name="OverStill" Stretch="Uniform" Opacity="0" />
@@ -56,7 +57,7 @@
       <!-- The chosen clip's, sound's or words' settings. -->
       <Border Grid.Column="1" Style="{StaticResource Card}" Margin="12,0,0,0" Padding="16,14,16,14">
         <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
-          <StackPanel IsEnabled="{Binding CanEdit}">
+          <StackPanel IsEnabled="{Binding CanEdit}" Margin="0,0,14,0">
             <TextBlock Text="{Binding ChosenName}" Style="{StaticResource Heading}" TextTrimming="CharacterEllipsis" />
             <TextBlock Text="Choose a clip, sound or words on the timeline to change it." Style="{StaticResource Caption}" Margin="0,6,0,0"
                        Visibility="{Binding IsNothingChosen, Converter={StaticResource VisibleIf}}" />
@@ -67,7 +68,27 @@
                 <TextBlock DockPanel.Dock="Right" Text="{Binding ClipVolumeText}" Style="{StaticResource Caption}" />
                 <TextBlock Text="Its sound" />
               </DockPanel>
-              <Slider Minimum="0" Maximum="100" Value="{Binding ClipVolume}" AutomationProperties.Name="Clip volume" />
+              <Slider Minimum="0" Maximum="400" SmallChange="5" LargeChange="25" Value="{Binding ClipVolume}" AutomationProperties.Name="Clip volume" />
+              <ComboBox Margin="0,6,0,0" SelectedIndex="{Binding ClipLevelIndex}" AutomationProperties.Name="Even out its sound">
+                <ComboBoxItem Content="As recorded" />
+                <ComboBoxItem Content="As loud as it can be" />
+                <ComboBoxItem Content="Evened out, as for speech" />
+              </ComboBox>
+              <DockPanel Margin="0,8,0,0">
+                <TextBlock DockPanel.Dock="Right" Text="{Binding ClipSpeedText}" Style="{StaticResource Caption}" />
+                <TextBlock Text="Speed" />
+              </DockPanel>
+              <Slider x:Name="SpeedSlider" Minimum="25" Maximum="400" SmallChange="5" LargeChange="25" Value="{Binding ClipSpeed}" AutomationProperties.Name="Speed"
+                      Thumb.DragCompleted="Speed_Done" PreviewMouseLeftButtonUp="Speed_Done" KeyUp="Speed_Done" />
+              <DockPanel Margin="0,4,0,0">
+                <TextBlock Text="Lasts" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <TextBox x:Name="LastsBox" Text="{Binding ClipLasts, UpdateSourceTrigger=LostFocus}" ToolTip="Type how long it should last, such as 60 or 1:00, to slow it down or speed it up to fit" AutomationProperties.Name="Lasts"
+                         KeyDown="Lasts_KeyDown" LostKeyboardFocus="Lasts_LostFocus" />
+              </DockPanel>
+              <StackPanel Margin="0,6,0,0" Visibility="{Binding ClipHasSpeed, Converter={StaticResource VisibleIf}}">
+                <RadioButton GroupName="SoundSpeed" Content="Its sound changes speed with it" IsChecked="{Binding ClipStretchesSound}" />
+                <RadioButton GroupName="SoundSpeed" Content="Its sound keeps its own speed" IsChecked="{Binding ClipKeepsSoundSpeed}" />
+              </StackPanel>
               <DockPanel Margin="0,8,0,0">
                 <TextBlock DockPanel.Dock="Right" Text="{Binding ClipFadeInText}" Style="{StaticResource Caption}" />
                 <TextBlock Text="Fade in from black" />
@@ -98,7 +119,12 @@
                 <TextBlock DockPanel.Dock="Right" Text="{Binding SoundVolumeText}" Style="{StaticResource Caption}" />
                 <TextBlock Text="Volume" />
               </DockPanel>
-              <Slider Minimum="0" Maximum="100" Value="{Binding SoundVolume}" AutomationProperties.Name="Sound volume" />
+              <Slider Minimum="0" Maximum="400" SmallChange="5" LargeChange="25" Value="{Binding SoundVolume}" AutomationProperties.Name="Sound volume" />
+              <ComboBox Margin="0,6,0,0" SelectedIndex="{Binding SoundLevelIndex}" AutomationProperties.Name="Even out the sound">
+                <ComboBoxItem Content="As recorded" />
+                <ComboBoxItem Content="As loud as it can be" />
+                <ComboBoxItem Content="Evened out, as for speech" />
+              </ComboBox>
               <DockPanel Margin="0,8,0,0">
                 <TextBlock DockPanel.Dock="Right" Text="{Binding SoundFadeInText}" Style="{StaticResource Caption}" />
                 <TextBlock Text="Fade in" />
@@ -109,7 +135,7 @@
                 <TextBlock Text="Fade out" />
               </DockPanel>
               <Slider Minimum="0" Maximum="10" SmallChange="0.1" LargeChange="1" Value="{Binding SoundFadeOut}" AutomationProperties.Name="Sound fade out" />
-              <TextBlock Text="To hear only this, turn the clips' own sound down." Style="{StaticResource Caption}" Margin="0,6,0,0" />
+              <TextBlock Text="To hear only this, turn the clips' own sound down. Above 100% is heard in the saved video; the preview stops at 100%." Style="{StaticResource Caption}" Margin="0,6,0,0" />
             </StackPanel>
 
             <!-- Words -->

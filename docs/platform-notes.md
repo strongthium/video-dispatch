@@ -221,6 +221,15 @@ Zoom, fades, crossfades, sounds and words, tried the same way on 2026-11-02:
 - **A file's own profile names a sound track even for a video made silent,** so a video's sound being there doesn't mean it's not silence.
 - **An M4A reads as a `MediaClip`,** so sounds are measured as videos are.
 
+Speed and how quickly pictures are read, measured the same way on 2026-11-02, on 720p test videos:
+
+- **`MediaComposition.GetThumbnailAsync` takes about 420 ms a frame,** and keeping the composition open doesn't help (it opens in 4 ms), so the time is in the call. Six asked at once took 1.6 seconds in all.
+- **`MediaPlayer` with `IsVideoFrameServerEnabled`,** kept open, jumps and hands over the frame in 15 to 25 ms: 16 ms each for 30 jumps in a row. It gave the same frame as the thumbnail at every moment tried, including on either side of a second's boundary, and turns a phone's video upright itself. Frames are copied with `CopyFrameToVideoSurface` into a `VideoFrame.CreateAsDirect3D11SurfaceBacked` surface, then `SoftwareBitmap.CreateCopyFromSurfaceAsync`. The editor now reads its pictures this way, with the thumbnail only if the player can't open a video.
+- **Nothing in a composition changes a clip's speed.** But each MP4 track counts its frames' times in a unit of its own, set once in its `mdhd` box. Changing that unit in a copy, and the durations in `mvhd`, `tkhd` and `elst` to match, made a 5-second video play for 10 seconds with every second's colour where it should be, and Windows saved it at 30 frames a second, each frame shown twice. Double speed worked the same way. The copy's sound tracks are renamed to `free`, since the sound is mixed separately. Nothing is re-encoded, so it's quick, but it only works for MP4 and MOV.
+- **Sped up, that copy has more frames a second than the edit, and a composition got it wrong half the time.** At 150% and 200%, about every other save took the copy's frames one after another instead of leaving every other one out, so the clip played at the old speed. Slowed down, it was right every time. Saving at 60 frames a second, or first making the sped-up part a video of its own at 30 with `MediaTranscoder`, was right in every try. The editor does the second, for sped-up clips only, about 1.5 seconds for a two-second clip.
+- **`MediaClip.Clone` didn't make a crossfade quicker:** 12 steps took 4.5 seconds to save either way, against 0.36 seconds for two plain seconds. So crossfades now use 6 steps a second rather than 12.
+- **Mixing a minute of three sounds took 0.9 seconds** when each sample's volume was worked out on its own. It's now worked out each millisecond and filled in between.
+
 ## Sources
 
 - [TikTok inbox upload](https://developers.tiktok.com/doc/content-posting-api-reference-upload-video)

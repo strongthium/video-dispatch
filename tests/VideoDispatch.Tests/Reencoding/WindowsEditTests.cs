@@ -330,6 +330,68 @@ public sealed class WindowsEditTests : IDisposable
     }
 
     [Fact]
+    public async Task A_slowed_clip_shows_each_second_for_twice_as_long_at_the_same_frame_rate()
+    {
+        var source = await MakeAsync("colours.mp4", 640, 360, true, Red, Green, Blue);
+        var project = EditProject.Empty.Insert(EditClip.Whole(source, Seconds(3)) with { Speed = 0.5 });
+
+        var output = await SaveAsync(project);
+
+        var read = Mp4MetadataReader.Read(output)!;
+        Assert.Equal(6, read.Duration!.Value.TotalSeconds, 0.2);
+        Assert.Equal(30, read.FramesPerSecond!.Value, 1.5);
+        Assert.Equal("red", await ColourAtAsync(output, 1.5));
+        Assert.Equal("green", await ColourAtAsync(output, 3.5));
+        Assert.Equal("blue", await ColourAtAsync(output, 5.5));
+    }
+
+    [Fact]
+    public async Task A_sped_up_clip_from_the_middle_of_a_video_shows_its_own_part()
+    {
+        var source = await MakeAsync("colours.mp4", 640, 360, true, Red, Green, Blue, Yellow);
+        var project = EditProject.Empty.Insert(new EditClip(source, Seconds(4), Seconds(1), Seconds(3)) with { Speed = 2 });
+
+        var output = await SaveAsync(project);
+
+        Assert.Equal(1, Mp4MetadataReader.Read(output)!.Duration!.Value.TotalSeconds, 0.2);
+        Assert.Equal("green", await ColourAtAsync(output, 0.25));
+        Assert.Equal("blue", await ColourAtAsync(output, 0.75));
+    }
+
+    [Fact]
+    public async Task A_slowed_clips_sound_is_slowed_with_it_unless_it_keeps_its_own_speed()
+    {
+        await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
+        var clicking = await MakeClickingAsync("clicking.mp4", clickAt: 1.0, seconds: 3);
+        var slowed = EditClip.Whole(clicking, Seconds(3)) with { Speed = 0.5 };
+
+        var stretched = await SaveAsync(EditProject.Empty.Insert(slowed), "stretched.mp4");
+        var kept = await SaveAsync(EditProject.Empty.Insert(slowed with { StretchSound = false }), "kept.mp4");
+
+        Assert.Equal(2.0, (await LoudestAsync(stretched)).Seconds, 0.05);
+        Assert.Equal(1.0, (await LoudestAsync(kept)).Seconds, 0.05);
+        Assert.Equal(6, Mp4MetadataReader.Read(kept)!.Duration!.Value.TotalSeconds, 0.2);
+    }
+
+    [Fact]
+    public async Task Sound_turned_up_is_louder_and_levelled_sound_is_near_full()
+    {
+        await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
+        var clicking = await MakeClickingAsync("clicking.mp4", clickAt: 1.0, seconds: 3);
+        var plain = (await LoudestAsync(await SaveAsync(EditProject.Empty.Insert(EditClip.Whole(clicking, Seconds(3)) with { Volume = 0.25 }), "plain.mp4"))).Level;
+
+        var louder = (await LoudestAsync(await SaveAsync(EditProject.Empty.Insert(EditClip.Whole(clicking, Seconds(3)) with { Volume = 0.25 * 3 }), "louder.mp4"))).Level;
+        Assert.InRange(louder / (double)plain, 2.5, 3.5);
+
+        // A quiet recording, at its own volume and then levelled, which happens before the volume.
+        var quiet = await MakeClickingAsync("quiet.mp4", clickAt: 1.0, seconds: 3, loudness: 0.2);
+        var asRecorded = (await LoudestAsync(await SaveAsync(EditProject.Empty.Insert(EditClip.Whole(quiet, Seconds(3))), "quiet-plain.mp4"))).Level;
+        var levelled = (await LoudestAsync(await SaveAsync(EditProject.Empty.Insert(EditClip.Whole(quiet, Seconds(3)) with { Level = SoundLevel.Loudest }), "levelled.mp4"))).Level;
+        Assert.InRange(levelled / (double)asRecorded, 4, 6);
+        Assert.InRange(levelled, 28000, short.MaxValue);
+    }
+
+    [Fact]
     public void A_fade_is_made_of_short_even_steps_that_cover_it()
     {
         var steps = WindowsVideoEncoder.Steps(Seconds(1), rising: true).ToList();
@@ -345,10 +407,10 @@ public sealed class WindowsEditTests : IDisposable
     }
 
     /// <summary>A video whose sound is a quiet hum with one loud click, so where the click ends up says where its sound went.</summary>
-    private async Task<string> MakeClickingAsync(string name, double clickAt, int seconds)
+    private async Task<string> MakeClickingAsync(string name, double clickAt, int seconds, double loudness = 1)
     {
         var sound = PathOf(name + ".wav");
-        WriteClick(sound, clickAt, seconds);
+        WriteClick(sound, clickAt, seconds, loudness);
         var composition = new Windows.Media.Editing.MediaComposition();
         composition.Clips.Add(Windows.Media.Editing.MediaClip.CreateFromColor(Blue, Seconds(seconds)));
         composition.BackgroundAudioTracks.Add(await Windows.Media.Editing.BackgroundAudioTrack.CreateFromFileAsync(await Windows.Storage.StorageFile.GetFileFromPathAsync(sound)));
@@ -362,7 +424,7 @@ public sealed class WindowsEditTests : IDisposable
         return file.Path;
     }
 
-    private static void WriteClick(string path, double clickAt, int seconds)
+    private static void WriteClick(string path, double clickAt, int seconds, double loudness = 1)
     {
         var frames = SoundMixer.Rate * seconds;
         var click = (int)(clickAt * SoundMixer.Rate);
@@ -371,9 +433,9 @@ public sealed class WindowsEditTests : IDisposable
         var sample = new byte[4];
         for (var frame = 0; frame < frames; frame++)
         {
-            var value = (short)(frame >= click && frame < click + 480
+            var value = (short)(loudness * (frame >= click && frame < click + 480
                 ? Math.Sin(frame * 2 * Math.PI * 1000 / SoundMixer.Rate) * 30000
-                : Math.Sin(frame * 2 * Math.PI * 200 / SoundMixer.Rate) * 1500);
+                : Math.Sin(frame * 2 * Math.PI * 200 / SoundMixer.Rate) * 1500));
             System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(sample, value);
             System.Buffers.Binary.BinaryPrimitives.WriteInt16LittleEndian(sample.AsSpan(2), value);
             file.Write(sample);
@@ -436,11 +498,47 @@ public sealed class WindowsEditTests : IDisposable
 
         Assert.Equal(3, (await WindowsVideoReader.ReadLengthAsync(source))!.Value.TotalSeconds, 0.1);
 
-        var picture = await WindowsVideoReader.ReadFrameAsync(source, Seconds(1.5), 90);
-        Assert.NotNull(picture);
-        var decoder = System.Windows.Media.Imaging.BitmapDecoder.Create(new MemoryStream(picture), System.Windows.Media.Imaging.BitmapCreateOptions.None, System.Windows.Media.Imaging.BitmapCacheOption.OnLoad);
-        Assert.Equal(90, decoder.Frames[0].PixelHeight);
-        Assert.Equal(160, decoder.Frames[0].PixelWidth);
+        var picture = (await WindowsVideoReader.ReadFrameAsync(source, Seconds(1.5), 90))!;
+        Assert.Equal((160, 90), (picture.Width, picture.Height));
+        Assert.Equal(160 * 90 * 4, picture.Pixels.Length);
+        Assert.Equal("green", new WindowsVideoEncoderTests.Frame(picture.Width, picture.Height, picture.Pixels).ColourInTheMiddle);
+    }
+
+    [Fact]
+    public async Task Pictures_land_on_the_moment_asked_for_wherever_the_last_one_was_and_quickly()
+    {
+        var source = await MakeAsync("colours.mp4", 640, 360, false, Red, Green, Blue, Yellow);
+        await WindowsVideoReader.ReadFrameAsync(source, Seconds(0.5), 180);
+
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        var seen = new List<string>();
+        foreach (var at in new[] { 3.5, 0.5, 2.5, 1.5, 1.5, 3.9, 0.1 })
+        {
+            var picture = (await WindowsVideoReader.ReadFrameAsync(source, Seconds(at), 180))!;
+            seen.Add(new WindowsVideoEncoderTests.Frame(picture.Width, picture.Height, picture.Pixels).ColourInTheMiddle);
+        }
+
+        Assert.Equal(["yellow", "red", "blue", "green", "green", "yellow", "red"], seen);
+
+        // Kept open, each is far quicker than the 0.4 seconds a thumbnail took.
+        Assert.InRange(watch.ElapsedMilliseconds / 7, 0, 200);
+        WindowsVideoReader.Release();
+    }
+
+    [Fact]
+    public async Task A_sideways_phone_videos_pictures_come_out_upright()
+    {
+        await WindowsVideoEncoderTests.SkipWithoutMediaToolsAsync();
+        var phone = await TestVideos.MakeAsync(_folder, "phone.mp4", 640, 360);
+        WindowsVideoEncoderTests.MarkRotatedClockwise(phone);
+
+        var picture = (await WindowsVideoReader.ReadFrameAsync(phone, Seconds(1), 320))!;
+        var frame = new WindowsVideoEncoderTests.Frame(picture.Width, picture.Height, picture.Pixels);
+
+        Assert.Equal((180, 320), (picture.Width, picture.Height));
+        Assert.True(frame.IsRed(frame.Width / 2, frame.Height / 4), "The top should be red.");
+        Assert.False(frame.IsRed(frame.Width / 2, frame.Height * 3 / 4), "The bottom should be blue.");
+        WindowsVideoReader.Release();
     }
 
     [Fact]

@@ -561,6 +561,104 @@ public sealed class EditPanelTests : IDisposable
         Assert.Contains("song.mp3 can't be found", panel.Message);
     }
 
+    [Fact]
+    public async Task Saying_how_long_a_clip_lasts_changes_its_speed_to_fit()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        Assert.Equal("0:30.0", panel.ClipLasts);
+        Assert.Equal("Normal", panel.ClipSpeedText);
+
+        panel.ClipLasts = "60";
+
+        Assert.Equal(0.5, panel.Project.Clips[0].Speed);
+        Assert.Equal(Seconds(60), panel.Length);
+        Assert.Equal("1:00.0", panel.ClipLasts);
+        Assert.Equal("50%", panel.ClipSpeedText);
+        Assert.True(panel.ClipHasSpeed);
+    }
+
+    [Fact]
+    public async Task A_length_that_cant_be_read_or_reached_is_put_back_or_held_in_range()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+
+        panel.ClipLasts = "a minute";
+        Assert.Equal(1, panel.Project.Clips[0].Speed);
+
+        panel.ClipLasts = "1:00:00";
+        Assert.Equal(EditClip.SlowestSpeed, panel.Project.Clips[0].Speed);
+    }
+
+    [Fact]
+    public async Task Once_its_speed_changes_a_clip_with_sound_asks_about_its_sound_until_answered()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        Assert.False(panel.NeedsSoundChoice);
+
+        panel.ClipSpeed = 50;
+        Assert.True(panel.NeedsSoundChoice);
+        Assert.Contains("deeper", panel.SoundChoiceQuestion);
+        Assert.True(panel.ClipStretchesSound);
+
+        panel.ClipKeepsSoundSpeed = true;
+        Assert.False(panel.NeedsSoundChoice);
+        Assert.False(panel.Project.Clips[0].StretchSound);
+
+        panel.ClipSpeed = 200;
+        Assert.False(panel.NeedsSoundChoice);
+        Assert.Contains("higher", panel.SoundChoiceQuestion);
+    }
+
+    [Fact]
+    public async Task A_muted_clip_isnt_asked_about_its_sound()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        panel.ClipVolume = 0;
+
+        panel.ClipSpeed = 50;
+
+        Assert.False(panel.NeedsSoundChoice);
+    }
+
+    [Fact]
+    public async Task Sound_can_be_turned_up_four_times_and_evened_out()
+    {
+        var panel = NewPanel();
+        await panel.AddVideosAsync([Video("lake.mp4", 30)]);
+        await panel.AddSoundsAsync([Video("song.mp3", 10)]);
+
+        panel.SoundVolume = 400;
+        panel.SoundLevelIndex = (int)SoundLevel.Evened;
+        panel.SelectedIndex = 0;
+        panel.ClipVolume = 250;
+        panel.ClipLevelIndex = (int)SoundLevel.Loudest;
+        panel.ClipLevelIndex = 9;
+
+        Assert.Equal((4.0, SoundLevel.Evened), (panel.Project.Sounds[0].Volume, panel.Project.Sounds[0].Level));
+        Assert.Equal((2.5, SoundLevel.Loudest), (panel.Project.Clips[0].Volume, panel.Project.Clips[0].Level));
+        Assert.Equal("250%", panel.ClipVolumeText);
+    }
+
+    [Theory]
+    [InlineData("60", 60)]
+    [InlineData("12.5", 12.5)]
+    [InlineData("1:00", 60)]
+    [InlineData("1:02:05", 3725)]
+    [InlineData(" 45 s ", 45)]
+    public void Lengths_are_read_as_seconds_or_minutes_and_seconds(string text, double seconds) =>
+        Assert.Equal(Seconds(seconds), EditPanel.ParseLength(text));
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("soon")]
+    [InlineData("-5")]
+    [InlineData("1:2:3:4")]
+    public void What_isnt_a_length_is_nothing(string text) => Assert.Null(EditPanel.ParseLength(text));
+
     [Theory]
     [InlineData("song.MP3", true)]
     [InlineData("birds.wav", true)]

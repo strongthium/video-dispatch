@@ -6,13 +6,41 @@ namespace VideoDispatch.Core.Editing;
 public sealed record EditClip(string SourcePath, TimeSpan SourceLength, TimeSpan Start, TimeSpan End)
 {
     public const double MostZoom = 4;
+    public const double MostVolume = 4;
+    public const double SlowestSpeed = 0.25;
+    public const double FastestSpeed = 4;
 
-    public TimeSpan Length => End - Start;
+    /// <summary>How much of its video it uses, in the video's own time.</summary>
+    public TimeSpan Span => End - Start;
+
+    /// <summary>How long it plays in the edit: its span, made longer by slowing it down or shorter by speeding it up.</summary>
+    public TimeSpan Length => Span / Speed;
 
     public string Name => Path.GetFileName(SourcePath);
 
-    /// <summary>How loud its sound is, from 0 for none to 1 as it was.</summary>
+    /// <summary>How loud its sound is, from 0 for none, through 1 as it was, to <see cref="MostVolume"/>.</summary>
     public double Volume { get; init; } = 1;
+
+    /// <summary>How its sound's loudness is evened out before its volume.</summary>
+    public SoundLevel Level { get; init; }
+
+    /// <summary>
+    /// How fast it plays: 0.5 takes twice as long, each frame shown twice, and 2 takes half as long. From
+    /// <see cref="SlowestSpeed"/> to <see cref="FastestSpeed"/>.
+    /// </summary>
+    public double Speed { get; init; } = 1;
+
+    /// <summary>
+    /// Whether its sound is slowed or sped up with the picture, so they stay in step, which also makes it lower or
+    /// higher. If not, the sound plays at its own speed from the clip's start, and stops at the clip's end or its own.
+    /// Null until asked, which counts as yes.
+    /// </summary>
+    public bool? StretchSound { get; init; }
+
+    public bool HasSpeed => Math.Abs(Speed - 1) > 0.0005;
+
+    /// <summary>Where a moment <paramref name="offset"/> into the clip, in the edit, is in its video.</summary>
+    public TimeSpan SourceAt(TimeSpan offset) => Start + (offset * Speed);
 
     /// <summary>How long the picture takes to come up from black, and the sound from silence, as it starts.</summary>
     public TimeSpan FadeIn { get; init; }
@@ -59,12 +87,28 @@ public sealed record EditSound(string SourcePath, TimeSpan SourceLength, TimeSpa
 
     public string Name => Path.GetFileName(SourcePath);
 
-    /// <summary>From 0 for none to 1 as it was.</summary>
+    /// <summary>From 0 for none, through 1 as it was, to <see cref="EditClip.MostVolume"/>.</summary>
     public double Volume { get; init; } = 1;
+
+    /// <summary>How its loudness is evened out before its volume.</summary>
+    public SoundLevel Level { get; init; }
 
     public TimeSpan FadeIn { get; init; }
 
     public TimeSpan FadeOut { get; init; }
+}
+
+/// <summary>How a sound's loudness is evened out before its volume is applied.</summary>
+public enum SoundLevel
+{
+    /// <summary>As it was recorded.</summary>
+    AsRecorded,
+
+    /// <summary>Made as loud as it can be without its loudest moment distorting.</summary>
+    Loudest,
+
+    /// <summary>Quiet parts brought up and loud parts down, then made as loud as it can be, as for speech.</summary>
+    Evened,
 }
 
 public enum TextPlace
@@ -205,7 +249,7 @@ public sealed record EditProject(IReadOnlyList<EditClip> Clips)
 
         var clip = Clips[index];
         var offset = Clamp(at - start, TimeSpan.Zero, clip.Length);
-        return new EditMoment(index, start, clip.Start + offset);
+        return new EditMoment(index, start, Min(clip.SourceAt(offset), clip.End));
     }
 
     /// <summary>What's seen at <paramref name="at"/>. Null when empty.</summary>
@@ -217,13 +261,13 @@ public sealed record EditProject(IReadOnlyList<EditClip> Clips)
         }
 
         var index = moment.Index;
-        var offset = moment.SourceTime - Clips[index].Start;
+        var offset = Clamp(at - moment.ClipStart, TimeSpan.Zero, Clips[index].Length);
         var overlap = OverlapBefore(index);
         if (overlap > TimeSpan.Zero && offset < overlap)
         {
             // The clip before is still playing under this one.
             var before = Clips[index - 1];
-            var under = new EditLook(index - 1, before.End - overlap + offset, 1);
+            var under = new EditLook(index - 1, before.SourceAt(before.Length - overlap + offset), 1);
             var over = new EditLook(index, moment.SourceTime, offset / overlap);
             return new EditView(under, over, 1 - Brightness(index - 1, before.Length - overlap + offset));
         }
@@ -291,7 +335,7 @@ public sealed record EditProject(IReadOnlyList<EditClip> Clips)
         }
 
         var clip = Clips[moment.Index];
-        if (moment.SourceTime - clip.Start < ShortestClip || clip.End - moment.SourceTime < ShortestClip)
+        if ((moment.SourceTime - clip.Start) / clip.Speed < ShortestClip || (clip.End - moment.SourceTime) / clip.Speed < ShortestClip)
         {
             return null;
         }
@@ -302,18 +346,18 @@ public sealed record EditProject(IReadOnlyList<EditClip> Clips)
         return this with { Clips = clips };
     }
 
-    /// <summary>Moves where a clip starts in its video, keeping it at least <see cref="ShortestClip"/> long.</summary>
+    /// <summary>Moves where a clip starts in its video, keeping it playing for at least <see cref="ShortestClip"/>.</summary>
     public EditProject TrimStart(int index, TimeSpan start)
     {
         var clip = Clips[index];
-        return ChangeClip(index, clip with { Start = Clamp(start, TimeSpan.Zero, clip.End - ShortestClip) });
+        return ChangeClip(index, clip with { Start = Clamp(start, TimeSpan.Zero, clip.End - (ShortestClip * clip.Speed)) });
     }
 
-    /// <summary>Moves where a clip ends in its video, keeping it at least <see cref="ShortestClip"/> long.</summary>
+    /// <summary>Moves where a clip ends in its video, keeping it playing for at least <see cref="ShortestClip"/>.</summary>
     public EditProject TrimEnd(int index, TimeSpan end)
     {
         var clip = Clips[index];
-        return ChangeClip(index, clip with { End = Clamp(end, clip.Start + ShortestClip, clip.SourceLength) });
+        return ChangeClip(index, clip with { End = Clamp(end, clip.Start + (ShortestClip * clip.Speed), clip.SourceLength) });
     }
 
     /// <summary>Puts <paramref name="clip"/> in place of clip <paramref name="index"/>, with its settings kept in range.</summary>
@@ -322,7 +366,9 @@ public sealed record EditProject(IReadOnlyList<EditClip> Clips)
         var clips = Clips.ToList();
         clips[index] = clip with
         {
-            Volume = Math.Clamp(clip.Volume, 0, 1),
+            Volume = Math.Clamp(clip.Volume, 0, EditClip.MostVolume),
+            Level = Enum.IsDefined(clip.Level) ? clip.Level : SoundLevel.AsRecorded,
+            Speed = Math.Clamp(double.IsFinite(clip.Speed) ? clip.Speed : 1, EditClip.SlowestSpeed, EditClip.FastestSpeed),
             FadeIn = Max(clip.FadeIn, TimeSpan.Zero),
             FadeOut = Max(clip.FadeOut, TimeSpan.Zero),
             Crossfade = Max(clip.Crossfade, TimeSpan.Zero),
@@ -379,7 +425,8 @@ public sealed record EditProject(IReadOnlyList<EditClip> Clips)
     private static EditSound Tidy(EditSound sound) => sound with
     {
         At = Max(sound.At, TimeSpan.Zero),
-        Volume = Math.Clamp(sound.Volume, 0, 1),
+        Volume = Math.Clamp(sound.Volume, 0, EditClip.MostVolume),
+        Level = Enum.IsDefined(sound.Level) ? sound.Level : SoundLevel.AsRecorded,
         FadeIn = Max(sound.FadeIn, TimeSpan.Zero),
         FadeOut = Max(sound.FadeOut, TimeSpan.Zero),
     };

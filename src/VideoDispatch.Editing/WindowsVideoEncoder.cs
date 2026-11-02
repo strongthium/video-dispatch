@@ -22,6 +22,9 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
     private const double StepsPerSecond = 12;
     private const int MostSteps = 24;
 
+    // Each step of a crossfade costs about a third of a second to save, as it reads its video again, so there are fewer.
+    private const double CrossfadeStepsPerSecond = 6;
+
     // CODECAPI_AVEncMPVGOPSize: how many frames there may be between key frames.
     private static readonly Guid KeyFrameInterval = new("95f31b26-95a4-41aa-9303-246a7fc6eef1");
 
@@ -84,6 +87,7 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
             var crossfades = new MediaOverlayLayer();
             var fades = new MediaOverlayLayer();
             var words = new MediaOverlayLayer();
+            var retimed = new Retimed(work.Folder, plan.FramesPerSecond ?? 30);
 
             for (var index = 0; index < project.Clips.Count; index++)
             {
@@ -94,7 +98,7 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
 
                 // Where it fades in over the clip before, that part is drawn over it instead, so the main line of clips
                 // plays the rest.
-                var shown = await ClipAsync(clip, clip.Start + overlap, clip.End, cancellationToken);
+                var shown = await ClipAsync(clip, retimed, overlap, clip.Length, cancellationToken);
                 if (clip.IsZoomed)
                 {
                     composition.Clips.Add(MediaClip.CreateFromColor(Black, clip.Length - overlap));
@@ -105,9 +109,9 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
                     composition.Clips.Add(shown);
                 }
 
-                foreach (var (from, to, opacity) in Steps(overlap, rising: true))
+                foreach (var (from, to, opacity) in Steps(overlap, rising: true, CrossfadeStepsPerSecond))
                 {
-                    var step = await ClipAsync(clip, clip.Start + from, clip.Start + to, cancellationToken);
+                    var step = await ClipAsync(clip, retimed, from, to, cancellationToken);
                     crossfades.Overlays.Add(new MediaOverlay(step, rect, opacity) { Delay = start + from, AudioEnabled = false });
                 }
 
@@ -182,14 +186,15 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
 
     /// <summary>The steps a fade of <paramref name="length"/> is made of: when each starts and ends, and how much it covers.</summary>
     /// <param name="rising">Each step covering more than the last, as when fading out to black, or fading a clip in over another.</param>
-    public static IEnumerable<(TimeSpan From, TimeSpan To, double Opacity)> Steps(TimeSpan length, bool rising)
+    /// <param name="perSecond">How many steps a second.</param>
+    public static IEnumerable<(TimeSpan From, TimeSpan To, double Opacity)> Steps(TimeSpan length, bool rising, double perSecond = StepsPerSecond)
     {
         if (length <= TimeSpan.Zero)
         {
             yield break;
         }
 
-        var count = Math.Clamp((int)Math.Round(length.TotalSeconds * StepsPerSecond), 3, MostSteps);
+        var count = Math.Clamp((int)Math.Round(length.TotalSeconds * perSecond), 3, MostSteps);
         for (var step = 0; step < count; step++)
         {
             var share = (step + 0.5) / count;
@@ -197,16 +202,97 @@ public sealed class WindowsVideoEncoder : IVideoEncoder
         }
     }
 
-    /// <summary>Part of a clip's video, from <paramref name="from"/> to <paramref name="to"/> of its own time, with its sound off.</summary>
-    private static async Task<MediaClip> ClipAsync(EditClip clip, TimeSpan from, TimeSpan to, CancellationToken cancellationToken)
+    /// <summary>
+    /// Part of a clip's video, from <paramref name="from"/> to <paramref name="to"/> into the clip as it plays in the edit,
+    /// with its sound off. A clip at another speed is read from a copy retimed to play at that speed.
+    /// </summary>
+    private static async Task<MediaClip> ClipAsync(EditClip clip, Retimed retimed, TimeSpan from, TimeSpan to, CancellationToken cancellationToken)
     {
-        var source = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(clip.SourcePath)).AsTask(cancellationToken);
+        var (path, begins) = clip.HasSpeed ? await retimed.ForAsync(clip, cancellationToken) : (clip.SourcePath, clip.Start);
+        var source = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(path)).AsTask(cancellationToken);
         var media = await MediaClip.CreateFromFileAsync(source).AsTask(cancellationToken);
-        var fromEnd = media.OriginalDuration - to;
-        media.TrimTimeFromStart = from;
+        var fromEnd = media.OriginalDuration - (begins + to);
+        media.TrimTimeFromStart = begins + from;
         media.TrimTimeFromEnd = fromEnd > TimeSpan.Zero ? fromEnd : TimeSpan.Zero;
         media.Volume = 0;
         return media;
+    }
+
+    /// <summary>
+    /// Videos at another speed, made once for each clip while saving. A copy retimed by <see cref="Mp4Retimer"/> does for
+    /// slowing down. Sped up, it has more frames a second than the edit, and a composition left out the right ones only
+    /// about half the times it was tried, playing the rest at the old speed; so a sped-up clip's part of the copy is first
+    /// made into a video of its own at the edit's frame rate, which came out right every time.
+    /// </summary>
+    private sealed class Retimed(string folder, double framesPerSecond)
+    {
+        private readonly Dictionary<(string, double), (string Path, double Speed)> _copies = [];
+        private readonly Dictionary<EditClip, string> _steady = [];
+
+        /// <summary>The video to read the clip from, and where in it the clip's part starts.</summary>
+        public async Task<(string Path, TimeSpan Begins)> ForAsync(EditClip clip, CancellationToken cancellationToken)
+        {
+            var (copy, speed) = CopyOf(clip);
+            var begins = clip.Start / speed;
+            if (clip.Speed <= 1)
+            {
+                return (copy, begins);
+            }
+
+            if (!_steady.TryGetValue(clip, out var steady))
+            {
+                steady = Path.Combine(folder, $"speed-steady-{_steady.Count}.mp4");
+                await File.WriteAllBytesAsync(steady, [], cancellationToken);
+                var source = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(copy)).AsTask(cancellationToken);
+                var target = await StorageFile.GetFileFromPathAsync(Path.GetFullPath(steady)).AsTask(cancellationToken);
+
+                // Its own size, in the order it's stored, which the transcoder turns upright itself; high quality, since
+                // it's encoded again in the edit.
+                var own = await MediaEncodingProfile.CreateFromFileAsync(source).AsTask(cancellationToken);
+                var profile = MediaEncodingProfile.CreateMp4(VideoEncodingQuality.HD1080p);
+                profile.Audio = null;
+                profile.Video.Width = own.Video.Width & ~1u;
+                profile.Video.Height = own.Video.Height & ~1u;
+                profile.Video.Bitrate = Math.Max(own.Video.Bitrate * 2, (uint)(own.Video.Width * own.Video.Height * framesPerSecond * 0.3));
+                profile.Video.FrameRate.Numerator = (uint)Math.Round(framesPerSecond * 1000);
+                profile.Video.FrameRate.Denominator = 1000;
+                AskForKeyFrames(profile, 1);
+
+                // The stop is a time in the file, as with sound.
+                var transcoder = new MediaTranscoder { TrimStartTime = begins, TrimStopTime = begins + clip.Length };
+                var prepared = await transcoder.PrepareFileTranscodeAsync(source, target, profile).AsTask(cancellationToken);
+                if (!prepared.CanTranscode)
+                {
+                    throw new EncodeException($"Windows' tools couldn't speed up {Path.GetFileName(clip.SourcePath)} ({prepared.FailureReason}). Choose FFmpeg under Settings to try that instead.");
+                }
+
+                await prepared.TranscodeAsync().AsTask(cancellationToken);
+                _steady[clip] = steady;
+            }
+
+            return (steady, TimeSpan.Zero);
+        }
+
+        private (string Path, double Speed) CopyOf(EditClip clip)
+        {
+            var key = (clip.SourcePath.ToUpperInvariant(), clip.Speed);
+            if (!_copies.TryGetValue(key, out var made))
+            {
+                var path = Path.Combine(folder, $"speed-{_copies.Count}{Path.GetExtension(clip.SourcePath)}");
+                try
+                {
+                    made = (path, Mp4Retimer.Retime(clip.SourcePath, path, clip.Speed));
+                }
+                catch (InvalidDataException exception)
+                {
+                    throw new EncodeException($"Windows' tools can only change the speed of MP4 and MOV videos, and {Path.GetFileName(clip.SourcePath)} couldn't be read as one ({exception.Message}). Choose FFmpeg under Settings to do it that way.", exception);
+                }
+
+                _copies[key] = made;
+            }
+
+            return made;
+        }
     }
 
     /// <summary>

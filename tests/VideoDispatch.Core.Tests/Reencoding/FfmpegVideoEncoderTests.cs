@@ -192,6 +192,20 @@ public sealed class FfmpegVideoEncoderTests : IDisposable
     }
 
     [Fact]
+    public void A_slowed_clip_reads_its_own_part_of_its_video_and_stretches_each_frames_time()
+    {
+        var project = Edit().ChangeClip(0, Edit().Clips[0] with { Speed = 0.5 });
+
+        var arguments = EditArguments(project);
+        var first = Filters(arguments)[0];
+
+        Assert.Equal(["-ss", "1.5", "-t", "2.5", "-i", @"C:\Videos\lake.mp4"], arguments.Skip(arguments.IndexOf("-ss")).Take(6));
+        Assert.Contains(",setsar=1,setpts=(PTS-STARTPTS)/0.5,fps=30,", first);
+        Assert.Contains("tpad=stop_mode=clone:stop_duration=5,trim=duration=5,", first);
+        Assert.Equal("7", arguments[arguments.IndexOf("-t", arguments.IndexOf("-filter_complex")) + 1]);
+    }
+
+    [Fact]
     public void A_stretch_of_sound_is_read_out_as_the_mixer_wants_it()
     {
         var piece = new SoundPiece(@"C:\Music\song.mp3", TimeSpan.FromSeconds(12), TimeSpan.FromSeconds(20.5), TimeSpan.Zero, _ => 1);

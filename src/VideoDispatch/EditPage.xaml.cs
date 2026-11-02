@@ -35,6 +35,7 @@ public sealed partial class EditPage : UserControl
     private const double SnapshotLongestSide = 960;
     private static readonly TimeSpan OneFrame = TimeSpan.FromSeconds(1.0 / 30);
     private static readonly TimeSpan SoundDrift = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan PrepareNext = TimeSpan.FromSeconds(1.5);
     private static readonly double[] RulerSteps = [0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800];
     private static readonly Brush SoundFill = Frozen(Color.FromArgb(0x99, 0x2E, 0x8B, 0x57));
     private static readonly Brush TextFill = Frozen(Color.FromArgb(0x99, 0x7A, 0x5A, 0xF8));
@@ -63,6 +64,7 @@ public sealed partial class EditPage : UserControl
     private double _soundTop;
     private double _textTop;
     private bool _playing;
+    private bool _redrawAsked;
     private bool _switching;
     private bool _fitted;
     private bool _fitting;
@@ -70,6 +72,11 @@ public sealed partial class EditPage : UserControl
     private int _playingIndex = -1;
     private TimeSpan _playingClipStart;
     private string? _openSource;
+    private string? _standbySource;
+    private bool _standbyReady;
+    private MediaElement _player;
+    private MediaElement _standby;
+    private TimeSpan _seekTarget;
     private DateTime _seekedAt;
     private ImageSource? _nextPicture;
 
@@ -119,7 +126,10 @@ public sealed partial class EditPage : UserControl
 
             Redraw();
         };
+        _player = Player;
+        _standby = Standby;
         Player.MediaFailed += (_, _) => Stop();
+        Standby.MediaFailed += (_, _) => _standbyReady = false;
 
         Timeline.MouseLeftButtonDown += Timeline_MouseDown;
         Timeline.MouseMove += Timeline_MouseMove;
@@ -159,6 +169,12 @@ public sealed partial class EditPage : UserControl
 
     private void Panel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        // These come with the playhead's moves, which are handled once already.
+        if (e.PropertyName is nameof(EditPanel.TimeText) or nameof(EditPanel.CanSplit))
+        {
+            return;
+        }
+
         if (!ReferenceEquals(Panel.Project, _drawn) && _drag is null)
         {
             if (_playing)
@@ -269,6 +285,22 @@ public sealed partial class EditPage : UserControl
         }
 
         _drawnChoice = (Panel.Chosen, Panel.SelectedIndex, Panel.SelectedSound, Panel.SelectedText);
+    }
+
+    /// <summary>Redraws once the mouse has stopped sending moves for this frame, rather than for every one of them.</summary>
+    private void RequestRedraw()
+    {
+        if (_redrawAsked)
+        {
+            return;
+        }
+
+        _redrawAsked = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
+        {
+            _redrawAsked = false;
+            Redraw();
+        });
     }
 
     /// <summary>Which line each sound goes on: the first one free when it starts, so sounds that overlap are seen apart.</summary>
@@ -386,6 +418,11 @@ public sealed partial class EditPage : UserControl
         if (clip.IsZoomed)
         {
             notes.Add($"zoom {clip.Zoom * 100:0}%");
+        }
+
+        if (clip.HasSpeed)
+        {
+            notes.Add($"speed {clip.Speed * 100:0}%");
         }
 
         if (clip.Volume <= 0)
@@ -586,7 +623,7 @@ public sealed partial class EditPage : UserControl
         ApplyView(project, Panel.Position);
 
         var key = (under.SourcePath, underAt, over?.SourcePath, overAt);
-        if (key == _stillKey && Player.Visibility != Visibility.Visible)
+        if (key == _stillKey && _player.Visibility != Visibility.Visible)
         {
             return;
         }
@@ -611,12 +648,12 @@ public sealed partial class EditPage : UserControl
 
         try
         {
-            await Task.Delay(60, load.Token);
+            await Task.Delay(15, load.Token);
             var picture = await _readFrame(path, at, StillHeight, load.Token);
             if (!load.IsCancellationRequested && picture is not null && !_playing)
             {
                 Still.Source = picture;
-                Player.Visibility = Visibility.Hidden;
+                _player.Visibility = Visibility.Hidden;
                 Cover.Visibility = Visibility.Hidden;
             }
         }
@@ -765,26 +802,32 @@ public sealed partial class EditPage : UserControl
                 Cover.Visibility = Visibility.Visible;
             }
 
-            Player.Visibility = Visibility.Hidden;
+            _player.Visibility = Visibility.Hidden;
             OverStill.Opacity = 0;
             _nextPicture = null;
+
+            // The other player may already have it open, from just before the cut.
+            if (!string.Equals(_openSource, clip.SourcePath, StringComparison.OrdinalIgnoreCase) && _standbyReady && string.Equals(_standbySource, clip.SourcePath, StringComparison.OrdinalIgnoreCase))
+            {
+                _player.Pause();
+                (_player, _standby) = (_standby, _player);
+                (_openSource, _standbySource) = (_standbySource, _openSource);
+            }
 
             if (!string.Equals(_openSource, clip.SourcePath, StringComparison.OrdinalIgnoreCase))
             {
                 var opened = new TaskCompletionSource<bool>();
                 void Opened(object? sender, RoutedEventArgs e) => opened.TrySetResult(true);
                 void Failed(object? sender, ExceptionRoutedEventArgs e) => opened.TrySetResult(false);
-                Player.MediaOpened += Opened;
-                Player.MediaFailed += Failed;
+                _player.MediaOpened += Opened;
+                _player.MediaFailed += Failed;
                 try
                 {
-                    // WPF's player ignores the mark a phone leaves to show its video turned upright.
-                    var turn = Panel.RotationOf(clip.SourcePath);
-                    Player.LayoutTransform = turn == 0 ? Transform.Identity : new RotateTransform(turn);
+                    Turn(_player, clip.SourcePath);
 
                     // Opened playing: opened paused, it ignored the jump that follows.
-                    Player.Source = new Uri(clip.SourcePath);
-                    Player.Play();
+                    _player.Source = new Uri(clip.SourcePath);
+                    _player.Play();
                     var done = await Task.WhenAny(opened.Task, Task.Delay(TimeSpan.FromSeconds(10)));
                     if (done != opened.Task || !await opened.Task)
                     {
@@ -795,8 +838,8 @@ public sealed partial class EditPage : UserControl
                 }
                 finally
                 {
-                    Player.MediaOpened -= Opened;
-                    Player.MediaFailed -= Failed;
+                    _player.MediaOpened -= Opened;
+                    _player.MediaFailed -= Failed;
                 }
 
                 _openSource = clip.SourcePath;
@@ -808,10 +851,12 @@ public sealed partial class EditPage : UserControl
             }
 
             PlayerHost.RenderTransform = ZoomOf(clip);
-            Player.Volume = project.ClipGain(moment.Index, moment.SourceTime - clip.Start);
-            Player.Position = moment.SourceTime;
+            _player.SpeedRatio = clip.Speed;
+            _player.Volume = Audible(project, moment.Index, (moment.SourceTime - clip.Start) / clip.Speed);
+            _player.Position = moment.SourceTime;
+            _seekTarget = moment.SourceTime;
             _seekedAt = DateTime.UtcNow;
-            Player.Play();
+            _player.Play();
             _playingIndex = moment.Index;
             _playingClipStart = moment.ClipStart;
 
@@ -846,18 +891,25 @@ public sealed partial class EditPage : UserControl
 
         var project = Panel.Project;
         var clip = project.Clips[_playingIndex];
-        var at = Player.Position;
-        if (at < clip.Start - TimeSpan.FromMilliseconds(100))
+        var at = _player.Position;
+        if (at < _seekTarget - TimeSpan.FromMilliseconds(100))
         {
-            // Still on its way there.
+            // Still on its way there. One that seems to have missed the jump is asked again.
+            if (DateTime.UtcNow - _seekedAt > TimeSpan.FromSeconds(1))
+            {
+                _player.Position = _seekTarget;
+                _seekedAt = DateTime.UtcNow;
+            }
+
             return;
         }
 
-        Player.Visibility = Visibility.Visible;
+        _seekTarget = TimeSpan.Zero;
+        _player.Visibility = Visibility.Visible;
         Cover.Visibility = Visibility.Hidden;
         if (at < clip.End)
         {
-            var offset = Max(at - clip.Start, TimeSpan.Zero);
+            var offset = Max(at - clip.Start, TimeSpan.Zero) / clip.Speed;
             Panel.Position = _playingClipStart + offset;
             ShowPlaying(project, _playingIndex, offset);
             return;
@@ -875,7 +927,7 @@ public sealed partial class EditPage : UserControl
         var following = project.Clips[next];
         var overlap = project.OverlapBefore(next);
         var start = project.StartOf(next);
-        if (overlap == TimeSpan.Zero && string.Equals(following.SourcePath, clip.SourcePath, StringComparison.OrdinalIgnoreCase) && following.Start == clip.End && following.Zoom == clip.Zoom && following.ZoomX == clip.ZoomX && following.ZoomY == clip.ZoomY)
+        if (overlap == TimeSpan.Zero && string.Equals(following.SourcePath, clip.SourcePath, StringComparison.OrdinalIgnoreCase) && following.Start == clip.End && following.Speed == clip.Speed && following.Zoom == clip.Zoom && following.ZoomX == clip.ZoomX && following.ZoomY == clip.ZoomY)
         {
             // It carries straight on in the same video.
             _playingIndex = next;
@@ -883,14 +935,20 @@ public sealed partial class EditPage : UserControl
             return;
         }
 
-        await StartClipAsync(new EditMoment(next, start, following.Start + overlap));
+        await StartClipAsync(new EditMoment(next, start, following.SourceAt(overlap)));
     }
 
     /// <summary>What goes with the playing picture at <paramref name="offset"/> into clip <paramref name="index"/>.</summary>
     private void ShowPlaying(EditProject project, int index, TimeSpan offset)
     {
         var clip = project.Clips[index];
-        Player.Volume = project.ClipGain(index, offset);
+        _player.Volume = Audible(project, index, offset);
+
+        // Shortly before a cut to another video, that video is opened in the other player, so the cut doesn't wait for it.
+        if (index + 1 < project.Clips.Count && clip.Length - offset < PrepareNext)
+        {
+            Prepare(project.Clips[index + 1].SourcePath);
+        }
         Darken.Opacity = 1 - project.Brightness(index, offset);
 
         var overlap = project.OverlapAfter(index);
@@ -909,10 +967,52 @@ public sealed partial class EditPage : UserControl
         PlaySoundLayers(project, Panel.Position);
     }
 
+    /// <summary>Opens a video in the waiting player, silent and out of sight, and holds it there until it's wanted.</summary>
+    private void Prepare(string path)
+    {
+        if (string.Equals(path, _openSource, StringComparison.OrdinalIgnoreCase) || string.Equals(path, _standbySource, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var waiting = _standby;
+        _standbySource = path;
+        _standbyReady = false;
+        void Opened(object? sender, RoutedEventArgs e)
+        {
+            waiting.MediaOpened -= Opened;
+            waiting.Pause();
+            _standbyReady = string.Equals(_standbySource, path, StringComparison.OrdinalIgnoreCase) && ReferenceEquals(waiting, _standby);
+        }
+
+        waiting.MediaOpened += Opened;
+        waiting.Visibility = Visibility.Hidden;
+        waiting.Volume = 0;
+        Turn(waiting, path);
+
+        // Opened playing, as the jump that comes later is otherwise ignored.
+        waiting.Source = new Uri(path);
+        waiting.Play();
+    }
+
+    /// <summary>WPF's player ignores the mark a phone leaves to show its video turned upright, so it's turned here.</summary>
+    private void Turn(MediaElement player, string path)
+    {
+        var turn = Panel.RotationOf(path);
+        player.LayoutTransform = turn == 0 ? Transform.Identity : new RotateTransform(turn);
+    }
+
+    /// <summary>
+    /// How loud the player plays a clip's sound. It can't go past as it was, and it can't play the sound at its own speed
+    /// while the picture plays at another, so that's left silent here; both are heard as they should be in the saved video.
+    /// </summary>
+    private static double Audible(EditProject project, int index, TimeSpan offset) =>
+        project.Clips[index] is { HasSpeed: true, StretchSound: false } ? 0 : Math.Min(1, project.ClipGain(index, offset));
+
     /// <summary>What the preview's pictures show, as a picture, so a turned or zoomed picture comes out as it's seen.</summary>
     private RenderTargetBitmap? Snapshot()
     {
-        if (Pictures.ActualWidth < 2 || Pictures.ActualHeight < 2 || (Player.Visibility != Visibility.Visible && Still.Source is null))
+        if (Pictures.ActualWidth < 2 || Pictures.ActualHeight < 2 || (_player.Visibility != Visibility.Visible && Still.Source is null))
         {
             return null;
         }
@@ -930,7 +1030,8 @@ public sealed partial class EditPage : UserControl
         var was = _playing;
         _playing = false;
         _clock.Stop();
-        Player.Pause();
+        _player.Pause();
+        _standby.Pause();
         PauseSoundLayers();
         PlayIcon.Text = "";
         if (was)
@@ -984,7 +1085,7 @@ public sealed partial class EditPage : UserControl
             var offset = at - sound.At;
             if (offset >= TimeSpan.Zero && offset < project.HeardLengthOf(index))
             {
-                layer.Player.Volume = project.SoundGain(index, offset);
+                layer.Player.Volume = Math.Min(1, project.SoundGain(index, offset));
                 var wanted = sound.Start + offset;
                 if (!layer.Playing || (layer.Player.Position - wanted).Duration() > SoundDrift)
                 {
@@ -1177,19 +1278,19 @@ public sealed partial class EditPage : UserControl
                     EditText text => Panel.Project.ChangeText(_drag.Index, text with { At = text.At + seconds }),
                     _ => null,
                 };
-                Redraw();
+                RequestRedraw();
                 break;
 
             case DragKind.TrimStart or DragKind.TrimEnd:
                 var start = _drag.Kind == DragKind.TrimStart;
                 _trimmed = _drag.Original switch
                 {
-                    EditClip clip => start ? Panel.Project.TrimStart(_drag.Index, clip.Start + seconds) : Panel.Project.TrimEnd(_drag.Index, clip.End + seconds),
+                    EditClip clip => start ? Panel.Project.TrimStart(_drag.Index, clip.Start + (seconds * clip.Speed)) : Panel.Project.TrimEnd(_drag.Index, clip.End + (seconds * clip.Speed)),
                     EditSound sound => start ? Panel.Project.TrimSoundStart(_drag.Index, sound.Start + seconds) : Panel.Project.TrimSoundEnd(_drag.Index, sound.End + seconds),
                     EditText text => start ? Panel.Project.TrimTextStart(_drag.Index, text.At + seconds) : Panel.Project.TrimTextEnd(_drag.Index, text.Finish + seconds),
                     _ => null,
                 };
-                Redraw();
+                RequestRedraw();
 
                 // Show the picture at the edge of a clip being moved.
                 if (_drag.Item == EditItem.Clip && _trimmed is not null)
@@ -1471,6 +1572,33 @@ public sealed partial class EditPage : UserControl
             await Panel.AddSoundsAsync(dialog.FileNames);
         }
     }
+
+    /// <summary>Once a clip's speed has been changed, asks whether its sound should change with it, if nobody has said.</summary>
+    private void AskAboutSound()
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Input, () =>
+        {
+            if (_panel is { NeedsSoundChoice: true } panel)
+            {
+                var answer = MessageBox.Show(Window.GetWindow(this)!, panel.SoundChoiceQuestion, "Its sound", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                panel.ClipStretchesSound = answer == MessageBoxResult.Yes;
+            }
+        });
+    }
+
+    private void Speed_Done(object sender, RoutedEventArgs e) => AskAboutSound();
+
+    private void Lasts_KeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Enter)
+        {
+            LastsBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
+            AskAboutSound();
+            e.Handled = true;
+        }
+    }
+
+    private void Lasts_LostFocus(object sender, KeyboardFocusChangedEventArgs e) => AskAboutSound();
 
     private void AddText_Click(object sender, RoutedEventArgs e)
     {

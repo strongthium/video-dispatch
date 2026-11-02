@@ -76,7 +76,7 @@ public sealed class SoundMixerTests : IDisposable
     }
 
     [Fact]
-    public void Too_loud_together_is_held_at_the_loudest_there_is_rather_than_wrapping_round()
+    public void Too_loud_together_is_held_just_under_full_rather_than_clipped()
     {
         var output = PathOf("mix.wav");
         SoundMixer.Mix(
@@ -87,7 +87,149 @@ public sealed class SoundMixerTests : IDisposable
             Seconds(1),
             output);
 
-        Assert.Equal(short.MaxValue, Read(output).At(0.5));
+        Assert.InRange(Read(output).At(0.5), 31000, 31800);
+        Assert.InRange(Read(output).At(0), 31000, 31800);
+    }
+
+    [Fact]
+    public void Sound_turned_up_four_times_is_held_under_full_and_quiet_sound_stays_as_it_was()
+    {
+        var output = PathOf("mix.wav");
+        SoundMixer.Mix(
+            [
+                (new SoundPiece("loud", Seconds(0), Seconds(1), Seconds(0), _ => 4), Steady("loud.wav", 1, 20000)),
+                (new SoundPiece("quiet", Seconds(0), Seconds(1), Seconds(2), _ => 4), Steady("quiet.wav", 1, 1000)),
+            ],
+            Seconds(3),
+            output);
+
+        var (at, _) = Read(output);
+        Assert.InRange(at(0.5), 31000, 31800);
+        Assert.Equal(4000, at(2.5));
+    }
+
+    /// <summary>A WAV that's silent but for one loud frame at <paramref name="clickAt"/>.</summary>
+    private string Click(string name, double seconds, double clickAt)
+    {
+        var path = PathOf(name);
+        var frames = SoundMixer.FramesIn(Seconds(seconds));
+        var click = (long)(clickAt * SoundMixer.Rate);
+        using var file = File.Create(path);
+        SoundMixer.WriteHeader(file, frames);
+        var frame = new byte[4];
+        for (var each = 0L; each < frames; each++)
+        {
+            var level = (short)(each == click ? 20000 : 0);
+            BinaryPrimitives.WriteInt16LittleEndian(frame, level);
+            BinaryPrimitives.WriteInt16LittleEndian(frame.AsSpan(2), level);
+            file.Write(frame);
+        }
+
+        return path;
+    }
+
+    private static double LoudestAt(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        var loudest = 0;
+        var loudestAt = 0;
+        for (var at = 44; at + 2 <= bytes.Length; at += 4)
+        {
+            var level = Math.Abs((int)BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(at)));
+            if (level > loudest)
+            {
+                (loudest, loudestAt) = (level, (at - 44) / 4);
+            }
+        }
+
+        return loudestAt / (double)SoundMixer.Rate;
+    }
+
+    [Theory]
+    [InlineData(0.5, 2)]
+    [InlineData(2, 0.5)]
+    [InlineData(1, 1)]
+    public void A_piece_at_another_speed_is_heard_slowed_or_sped_up_and_lasts_that_much_longer_or_shorter(double rate, double clickHeardAt)
+    {
+        var output = PathOf("mix.wav");
+        var piece = new SoundPiece("a", Seconds(0), Seconds(2), Seconds(0), _ => 1) { Rate = rate };
+
+        SoundMixer.Mix([(piece, Click("click.wav", 2, 1))], Seconds(8), output);
+
+        Assert.Equal(Seconds(2 / rate), piece.Length);
+        Assert.Equal(clickHeardAt, LoudestAt(output), 3);
+    }
+
+    [Fact]
+    public void Levelling_to_loudest_turns_the_whole_sound_up_until_its_peak_is_just_under_full()
+    {
+        var output = PathOf("levelled.wav");
+
+        SoundMixer.LevelFile(Steady("quiet.wav", 1, 4000), output, SoundLevel.Loudest);
+
+        Assert.InRange(Read(output).At(0.5), 31000, 31200);
+    }
+
+    [Fact]
+    public void Levelling_never_turns_near_silence_into_loud_hiss()
+    {
+        var output = PathOf("levelled.wav");
+
+        SoundMixer.LevelFile(Steady("hiss.wav", 1, 10), output, SoundLevel.Loudest);
+
+        Assert.Equal(200, Read(output).At(0.5));
+    }
+
+    [Fact]
+    public void Evening_out_brings_quiet_parts_closer_to_loud_ones()
+    {
+        // A loud second, then a quiet one, as speech close to and far from the microphone might be.
+        var input = PathOf("speech.wav");
+        using (var file = File.Create(input))
+        {
+            SoundMixer.WriteHeader(file, SoundMixer.Rate * 2);
+            var frame = new byte[4];
+            for (var each = 0; each < SoundMixer.Rate * 2; each++)
+            {
+                var level = (short)((each < SoundMixer.Rate ? 24000 : 2400) * (each % 2 == 0 ? 1 : -1));
+                BinaryPrimitives.WriteInt16LittleEndian(frame, level);
+                BinaryPrimitives.WriteInt16LittleEndian(frame.AsSpan(2), level);
+                file.Write(frame);
+            }
+        }
+
+        var output = PathOf("evened.wav");
+        SoundMixer.LevelFile(input, output, SoundLevel.Evened);
+
+        var (at, _) = Read(output);
+        var loud = Math.Abs((int)at(0.5));
+        var quiet = Math.Abs((int)at(1.5));
+        Assert.InRange(loud, 28000, 31200);
+        Assert.True(quiet / (double)loud > 0.2, $"Quiet {quiet} against loud {loud} should be closer than a tenth.");
+    }
+
+    [Fact]
+    public void A_slowed_clips_sound_is_stretched_with_it_unless_it_keeps_its_own_speed()
+    {
+        var clip = EditClip.Whole("lake.mp4", Seconds(30)) with { Speed = 0.5 };
+
+        var stretched = SoundMixer.PiecesOf(EditProject.Empty.Insert(clip)).Single();
+        var kept = SoundMixer.PiecesOf(EditProject.Empty.Insert(clip with { StretchSound = false })).Single();
+        var fasterKept = SoundMixer.PiecesOf(EditProject.Empty.Insert(clip with { Speed = 2, StretchSound = false })).Single();
+
+        Assert.Equal((0.5, Seconds(60)), (stretched.Rate, stretched.Length));
+        Assert.Equal((1.0, Seconds(30)), (kept.Rate, kept.Length));
+        Assert.Equal((1.0, Seconds(15)), (fasterKept.Rate, fasterKept.Length));
+    }
+
+    [Fact]
+    public void Each_piece_keeps_how_it_is_to_be_evened_out()
+    {
+        var project = EditProject.Empty
+            .Insert(EditClip.Whole("lake.mp4", Seconds(10)) with { Level = SoundLevel.Evened })
+            .AddSound(new EditSound("song.mp3", Seconds(5), TimeSpan.Zero, Seconds(5), TimeSpan.Zero) { Level = SoundLevel.Loudest });
+
+        Assert.Equal([SoundLevel.Evened, SoundLevel.Loudest], SoundMixer.PiecesOf(project).Select(piece => piece.Level));
     }
 
     [Fact]

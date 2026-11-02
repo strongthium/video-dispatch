@@ -111,8 +111,9 @@ public sealed class EditPanel : INotifyPropertyChanged
         get => _position;
         set
         {
+            // It moves 30 times a second while playing, so only what follows it is told.
             _position = value < TimeSpan.Zero ? TimeSpan.Zero : value > Length ? Length : value;
-            Refresh();
+            Refresh(nameof(Position), nameof(TimeText), nameof(CanSplit));
         }
     }
 
@@ -231,6 +232,65 @@ public sealed class EditPanel : INotifyPropertyChanged
 
     public bool ClipIsZoomed => Clip?.IsZoomed == true;
 
+    /// <summary>How its sound is evened out: as recorded, as loud as it can be, or evened like speech.</summary>
+    public int ClipLevelIndex
+    {
+        get => (int)(Clip?.Level ?? SoundLevel.AsRecorded);
+        set => ChangeClip("level", clip => Enum.IsDefined((SoundLevel)value) ? clip with { Level = (SoundLevel)value } : clip);
+    }
+
+    /// <summary>How fast the chosen clip plays, as a percentage: 50 makes it last twice as long.</summary>
+    public double ClipSpeed
+    {
+        get => (Clip?.Speed ?? 1) * 100;
+        set => ChangeClip("speed", clip => clip with { Speed = Math.Round(value) / 100 });
+    }
+
+    public string ClipSpeedText => Clip is { HasSpeed: true } clip ? Percent(clip.Speed * 100) : "Normal";
+
+    /// <summary>
+    /// How long the chosen clip lasts, as seconds or minutes and seconds, such as 60 or 1:00. Setting it changes the
+    /// speed to match: a 30-second clip set to 60 plays at half speed, each frame shown twice.
+    /// </summary>
+    public string ClipLasts
+    {
+        get => Clip is { } clip ? Format(clip.Length) : "";
+        set
+        {
+            if (Clip is { } clip && ParseLength(value) is { TotalSeconds: > 0 } wanted)
+            {
+                ChangeClip("lasts", each => each with { Speed = clip.Span / wanted });
+            }
+            else
+            {
+                Refresh(nameof(ClipLasts));
+            }
+        }
+    }
+
+    public bool ClipHasSpeed => Clip?.HasSpeed == true;
+
+    /// <summary>Whether the chosen clip's sound changes speed with its picture. Until it's chosen, it does.</summary>
+    public bool ClipStretchesSound
+    {
+        get => Clip?.StretchSound != false;
+        set => ChangeClip("stretch", clip => clip with { StretchSound = value });
+    }
+
+    public bool ClipKeepsSoundSpeed
+    {
+        get => !ClipStretchesSound;
+        set => ClipStretchesSound = !value;
+    }
+
+    /// <summary>Whether to ask about the chosen clip's sound: its speed has changed, it has sound to hear, and nobody has said.</summary>
+    public bool NeedsSoundChoice => Clip is { HasSpeed: true, StretchSound: null, Volume: > 0 };
+
+    /// <summary>The question about the chosen clip's sound, in words that fit its new speed.</summary>
+    public string SoundChoiceQuestion => Clip is { } clip && clip.Speed < 1
+        ? $"This clip now plays at {Percent(clip.Speed * 100)} speed, so it lasts {Format(clip.Length)}.\n\nSlow its sound down the same way, so it stays in step with the picture? It will sound deeper.\n\nYes: slow the sound too.\nNo: keep the sound at its own speed. It will end before the picture does."
+        : $"This clip now plays at {Percent(ClipSpeed)} speed, so it lasts {Format(Clip?.Length ?? TimeSpan.Zero)}.\n\nSpeed its sound up the same way, so it stays in step with the picture? It will sound higher.\n\nYes: speed the sound up too.\nNo: keep the sound at its own speed. It will be cut off where the picture ends.";
+
     // The chosen sound's settings.
 
     public double SoundVolume
@@ -256,6 +316,12 @@ public sealed class EditPanel : INotifyPropertyChanged
     }
 
     public string SoundFadeOutText => SecondsText(SoundFadeOut);
+
+    public int SoundLevelIndex
+    {
+        get => (int)(Sound?.Level ?? SoundLevel.AsRecorded);
+        set => ChangeSound("level", sound => Enum.IsDefined((SoundLevel)value) ? sound with { Level = (SoundLevel)value } : sound);
+    }
 
     // The chosen words' settings.
 
@@ -626,6 +692,30 @@ public sealed class EditPanel : INotifyPropertyChanged
 
     private static TimeSpan Seconds(double value) => TimeSpan.FromSeconds(Math.Round(Math.Max(0, value), 2));
 
+    /// <summary>Seconds, such as 60 or 12.5, or minutes and seconds, such as 1:00 or 1:02:05. Null if it's neither.</summary>
+    public static TimeSpan? ParseLength(string? text)
+    {
+        var parts = (text ?? "").Trim().TrimEnd('s', 'S').Trim().Split(':');
+        double total = 0;
+        foreach (var part in parts)
+        {
+            if (!double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out var number) &&
+                !double.TryParse(part, NumberStyles.Float, CultureInfo.CurrentCulture, out number))
+            {
+                return null;
+            }
+
+            if (number < 0 || !double.IsFinite(number))
+            {
+                return null;
+            }
+
+            total = (total * 60) + number;
+        }
+
+        return parts.Length is >= 1 and <= 3 ? TimeSpan.FromSeconds(total) : null;
+    }
+
     private static string SecondsText(double seconds) => seconds <= 0 ? "Off" : seconds.ToString("0.0 's'", CultureInfo.InvariantCulture);
 
     private static string Percent(double value) => Math.Round(value).ToString("0", CultureInfo.InvariantCulture) + "%";
@@ -839,4 +929,12 @@ public sealed class EditPanel : INotifyPropertyChanged
     }
 
     private void Refresh() => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(""));
+
+    private void Refresh(params string[] names)
+    {
+        foreach (var name in names)
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+    }
 }

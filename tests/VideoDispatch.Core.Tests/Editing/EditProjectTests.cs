@@ -243,9 +243,11 @@ public sealed class EditProjectTests
     [Fact]
     public void Changing_a_clip_keeps_its_settings_in_range()
     {
-        var clip = Two().ChangeClip(0, Lake with { Volume = 3, Zoom = 9, ZoomX = -1, ZoomY = 2, FadeIn = Seconds(-1) }).Clips[0];
+        var clip = Two().ChangeClip(0, Lake with { Volume = 9, Zoom = 9, ZoomX = -1, ZoomY = 2, FadeIn = Seconds(-1), Speed = 20, Level = (SoundLevel)7 }).Clips[0];
 
-        Assert.Equal((1.0, EditClip.MostZoom, 0.0, 1.0, TimeSpan.Zero), (clip.Volume, clip.Zoom, clip.ZoomX, clip.ZoomY, clip.FadeIn));
+        Assert.Equal((EditClip.MostVolume, EditClip.MostZoom, 0.0, 1.0, TimeSpan.Zero), (clip.Volume, clip.Zoom, clip.ZoomX, clip.ZoomY, clip.FadeIn));
+        Assert.Equal((EditClip.FastestSpeed, SoundLevel.AsRecorded), (clip.Speed, clip.Level));
+        Assert.Equal(EditClip.SlowestSpeed, Two().ChangeClip(0, Lake with { Speed = 0 }).Clips[0].Speed);
     }
 
     [Theory]
@@ -333,6 +335,66 @@ public sealed class EditProjectTests
         Assert.Equal(EditProject.ShortestClip, project.TrimTextStart(0, Seconds(9)).Texts[0].Length);
         Assert.Equal(Seconds(5), project.TrimTextEnd(0, Seconds(6)).Texts[0].Length);
         Assert.Equal(EditProject.ShortestClip, project.TrimTextEnd(0, TimeSpan.Zero).Texts[0].Length);
+    }
+
+    private static EditProject Slowed() => Two().ChangeClip(0, Lake with { Speed = 0.5 });
+
+    [Fact]
+    public void A_slowed_clip_lasts_longer_and_the_edit_with_it()
+    {
+        var project = Slowed();
+
+        Assert.Equal(Seconds(10), project.Clips[0].Span);
+        Assert.Equal(Seconds(20), project.Clips[0].Length);
+        Assert.Equal(Seconds(20), project.StartOf(1));
+        Assert.Equal(Seconds(24), project.Length);
+        Assert.Equal(Seconds(2.5), Two().ChangeClip(0, Lake with { Speed = 4 }).Clips[0].Length);
+    }
+
+    [Fact]
+    public void A_moment_in_a_slowed_clip_is_found_at_its_place_in_the_video()
+    {
+        var project = Slowed();
+
+        Assert.Equal(new EditMoment(0, TimeSpan.Zero, Seconds(5)), project.Find(Seconds(10)));
+        Assert.Equal(new EditMoment(1, Seconds(20), Seconds(1)), project.Find(Seconds(21)));
+        Assert.Equal(new EditLook(0, Seconds(7.5), 1), project.ViewAt(Seconds(15))!.Under);
+    }
+
+    [Fact]
+    public void A_crossfade_into_a_slowed_clip_shows_the_right_parts_of_both()
+    {
+        var project = Two()
+            .ChangeClip(0, Lake with { Speed = 2 })
+            .ChangeClip(1, Ridge with { Speed = 0.5, Crossfade = Seconds(2) });
+
+        // The first lasts 5 seconds and the second 8, overlapping for 2 from 3 seconds in.
+        var view = project.ViewAt(Seconds(4))!;
+
+        Assert.Equal(Seconds(11), project.Length);
+        Assert.Equal(new EditLook(0, Seconds(8), 1), view.Under);
+        Assert.Equal(new EditLook(1, Seconds(0.5), 0.5), view.Over);
+    }
+
+    [Fact]
+    public void Splitting_a_slowed_clip_cuts_at_the_same_moment_of_its_video_and_both_halves_keep_the_speed()
+    {
+        var split = Slowed().SplitAt(Seconds(6))!;
+
+        Assert.Equal((Seconds(0), Seconds(3)), (split.Clips[0].Start, split.Clips[0].End));
+        Assert.Equal((Seconds(3), Seconds(10)), (split.Clips[1].Start, split.Clips[1].End));
+        Assert.All(split.Clips.Take(2), clip => Assert.Equal(0.5, clip.Speed));
+        Assert.Equal(Slowed().Length, split.Length);
+    }
+
+    [Fact]
+    public void A_sped_up_clip_still_plays_for_a_moment_at_least()
+    {
+        var project = Two().ChangeClip(0, Lake with { Speed = 4 });
+
+        var trimmed = project.TrimEnd(0, TimeSpan.Zero).Clips[0];
+
+        Assert.Equal(EditProject.ShortestClip, trimmed.Length);
     }
 }
 
@@ -449,7 +511,7 @@ public sealed class EditStoreTests : IDisposable
 
         var read = new EditStore(PathOf("edit.json")).Load();
 
-        Assert.Equal((1.0, 1.0), (read.Clips[0].Volume, read.Clips[0].Zoom));
+        Assert.Equal((EditClip.MostVolume, 1.0), (read.Clips[0].Volume, read.Clips[0].Zoom));
         var sound = Assert.Single(read.Sounds);
         Assert.Equal((TimeSpan.Zero, 0.0), (sound.At, sound.Volume));
         Assert.Equal(["Hello"], read.Texts.Select(text => text.Text));

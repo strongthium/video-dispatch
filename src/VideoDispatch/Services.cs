@@ -108,24 +108,14 @@ public sealed record Services(
 
     private static async Task<ImageSource?> ReadFrameAsync(string path, TimeSpan at, int height, CancellationToken cancellationToken)
     {
-        if (await WindowsVideoReader.ReadFrameAsync(path, at, height, cancellationToken) is not { } encoded)
-        {
-            return null;
-        }
+        return await WindowsVideoReader.ReadFrameAsync(path, at, height, cancellationToken) is { } read ? ToImage(read) : null;
+    }
 
-        try
-        {
-            var picture = new BitmapImage();
-            picture.BeginInit();
-            picture.CacheOption = BitmapCacheOption.OnLoad;
-            picture.StreamSource = new MemoryStream(encoded);
-            picture.EndInit();
-            picture.Freeze();
-            return picture;
-        }
-        catch (Exception exception) when (exception is NotSupportedException or FileFormatException)
-        {
-            return null;
-        }
+    /// <summary>A picture from a video as WPF draws it, frozen so it can be handed between threads.</summary>
+    public static ImageSource ToImage(VideoPicture read)
+    {
+        var picture = BitmapSource.Create(read.Width, read.Height, 96, 96, PixelFormats.Pbgra32, null, read.Pixels, read.Width * 4);
+        picture.Freeze();
+        return picture;
     }
 }
