@@ -221,17 +221,25 @@ public static class WindowsVideoReader
                 // Asked for where it already is, it says nothing, so it isn't asked.
                 if (_at != at)
                 {
+                    // On a slow PC the first picture can take longer than the wait. Copying then gives black, not the
+                    // picture, so the slower way is used instead.
                     var frame = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     var seeked = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
                     void Available(MediaPlayer sender, object args) => frame.TrySetResult();
                     void Seeked(MediaPlaybackSession sender, object args) => seeked.TrySetResult();
                     _player.VideoFrameAvailable += Available;
                     session.SeekCompleted += Seeked;
+                    _at = null;
                     try
                     {
                         session.Position = at;
-                        await Task.WhenAny(Task.WhenAll(seeked.Task, frame.Task), Task.Delay(LongestWait, cancellationToken));
+                        var both = Task.WhenAll(seeked.Task, frame.Task);
+                        await Task.WhenAny(both, Task.Delay(LongestWait, cancellationToken));
                         cancellationToken.ThrowIfCancellationRequested();
+                        if (!both.IsCompleted)
+                        {
+                            throw new TimeoutException("Windows' player didn't hand over the picture in time.");
+                        }
                     }
                     finally
                     {

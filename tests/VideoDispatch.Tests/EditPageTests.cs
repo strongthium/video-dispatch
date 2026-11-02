@@ -181,31 +181,47 @@ public sealed class EditPageTests : IDisposable
     }
 
     /// <summary>
-    /// WPF's player is Windows Media Player's, which some PCs don't have even with the rest of the media tools, such as
-    /// Windows Server, where GitHub runs these tests. There the preview can't play, so tests of playing are skipped.
+    /// WPF's player is Windows Media Player's, which doesn't play everywhere the rest of Windows' media tools work. On
+    /// GitHub's runners it opens a video but its position never moves, likely because there's no sound device there.
+    /// Where it can't play, the preview can't either, so tests of playing are skipped.
     /// </summary>
     private static async Task SkipWithoutWpfPlayerAsync(string path)
     {
         var opened = new TaskCompletionSource<string?>();
         var player = await WindowThread.Value.InvokeAsync(() =>
         {
-            var opening = new MediaPlayer();
-            opening.MediaOpened += (_, _) => opened.TrySetResult(null);
-            opening.MediaFailed += (_, failed) => opened.TrySetResult(failed.ErrorException?.Message ?? "it couldn't open a video");
+            var playing = new MediaPlayer { Volume = 0 };
+            playing.MediaOpened += (_, _) =>
+            {
+                playing.Play();
+                opened.TrySetResult(null);
+            };
+            playing.MediaFailed += (_, failed) => opened.TrySetResult(failed.ErrorException?.Message ?? "it couldn't open a video");
             try
             {
-                opening.Open(new Uri(path));
+                playing.Open(new Uri(path));
             }
             catch (Exception exception)
             {
                 opened.TrySetResult(exception.Message);
             }
 
-            return opening;
+            return playing;
         });
 
         var trouble = await opened.Task.WaitAsync(Seconds(15)).ContinueWith(open => open.IsCompletedSuccessfully ? open.Result : "it didn't open a video within 15 seconds");
+        for (var wait = 0; trouble is null && wait < 50 && await WindowThread.Value.InvokeAsync(() => player.Position) < Seconds(0.3); wait++)
+        {
+            await Task.Delay(100);
+        }
+
+        var moved = await WindowThread.Value.InvokeAsync(() => player.Position);
         await WindowThread.Value.InvokeAsync(player.Close);
+        if (trouble is null && moved < Seconds(0.3))
+        {
+            trouble = "it opened a video, but didn't play it in 5 seconds";
+        }
+
         if (trouble is not null)
         {
             Assert.Skip($"WPF's player can't play video here: {trouble}");
