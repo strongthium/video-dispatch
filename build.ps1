@@ -3,7 +3,7 @@
     Builds video-dispatch and puts the finished program in public\.
 
 .DESCRIPTION
-    Runs the tests, then publishes video-dispatch-win-x64-needs-dotnet.exe, for x64 PCs, running on the .NET 10 Desktop
+    Runs the tests, then publishes video-dispatch.exe, for x64 PCs, running on the .NET 10 Desktop
     Runtime installed on the PC (https://dotnet.microsoft.com/download/dotnet/10.0), which Microsoft Update keeps
     patched.
 
@@ -38,7 +38,7 @@ $versionFile = Join-Path $root 'VERSION'
 $public = Join-Path $root 'public'
 # dotnet publishes to the ignored out\ first, so that public\ only changes once the build has worked.
 $out = Join-Path $root 'out\publish'
-$name = 'video-dispatch-win-x64-needs-dotnet.exe'
+$name = 'video-dispatch.exe'
 
 function Step([string] $text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 

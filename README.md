@@ -142,7 +142,7 @@ Adding videos to playlists is off unless you ask for it, because the YouTube per
 
 ## Using it
 
-Download a zip from [Releases](../../releases/latest), or take the `.exe` straight from [`public/`](public), which always holds the latest build: `video-dispatch-win-x64-needs-dotnet.exe`, about 7 MB, for Windows 10 (version 2004 or later) and 11 on x64 PCs. It runs on the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed on the PC, which Microsoft Update keeps patched. Without it, Windows offers to download it.
+Download a zip from [Releases](../../releases/latest), or take the `.exe` straight from [`public/`](public), which always holds the latest build: `video-dispatch.exe`, about 7 MB, for Windows 10 (version 2004 or later) and 11 on x64 PCs. It runs on the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0) installed on the PC, which Microsoft Update keeps patched. Without it, Windows offers to download it.
 
 The program is small because it draws with what Windows and .NET already have: WPF, with Windows 11's own look (light or dark, in your accent colour). It adds no packages. About 6 MB of it is Microsoft's own library for reaching Windows' media tools, kept zipped inside the program and unpacked into memory only when a video is edited or re-encoded.
 
